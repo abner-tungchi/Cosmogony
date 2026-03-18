@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "event-storming": {
+      "command": "node",
+      "args": ["mcp-server/dist/index.js"],
+      "cwd": "/Users/abnertsai/JiaBao/Mendesky/EventStormingTool"
+    }
+  }
+}
