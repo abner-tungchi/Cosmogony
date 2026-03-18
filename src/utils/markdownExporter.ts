@@ -1,0 +1,163 @@
+import type { Board } from '../types/board';
+import type { StickyNote, Bundle } from '../types/elements';
+
+function getTypeEmoji(type: string): string {
+  const emojis: Record<string, string> = {
+    DomainEvent: '⚡',
+    Command: '📋',
+    Aggregate: '📦',
+    Policy: '📜',
+    ExternalSystem: '🔌',
+    Actor: '👤',
+    ReadModel: '📊',
+    Hotspot: '❓',
+    Diamond: '◆',
+  };
+  return emojis[type] || '📌';
+}
+
+function findNearest(
+  note: StickyNote,
+  candidates: StickyNote[],
+  direction: 'left' | 'right'
+): StickyNote | null {
+  const filtered = candidates.filter((c) =>
+    direction === 'left' ? c.position.x < note.position.x : c.position.x > note.position.x
+  );
+  if (filtered.length === 0) return null;
+  filtered.sort((a, b) =>
+    direction === 'left'
+      ? b.position.x - a.position.x
+      : a.position.x - b.position.x
+  );
+  const closest = filtered.filter(
+    (c) => Math.abs(c.position.y - note.position.y) < 200
+  );
+  return closest[0] || filtered[0];
+}
+
+function getLabelForId(id: string, notes: StickyNote[], bundles: Bundle[]): string {
+  const note = notes.find((n) => n.id === id);
+  if (note) return `${note.type}: ${note.label}`;
+  const bundle = bundles.find((b) => b.id === id);
+  if (bundle) return `Bundle: ${bundle.infoNote.label}`;
+  return id;
+}
+
+export function exportToMarkdown(board: Board): string {
+  const lines: string[] = [];
+  lines.push(`# Event Storming: ${board.name}`);
+  lines.push('');
+  lines.push(`> Generated on ${new Date().toLocaleString()}`);
+  lines.push('');
+
+  // Bundles section
+  if (board.bundles && board.bundles.length > 0) {
+    lines.push('## Bundles');
+    lines.push('');
+    for (const bundle of board.bundles) {
+      lines.push(`### Bundle: ${bundle.infoNote.label || '(unnamed)'}`);
+      lines.push(`- **Aggregate (Info)**: ${bundle.infoNote.label}${bundle.infoNote.content ? ' — ' + bundle.infoNote.content : ''}`);
+      lines.push(`- **Entity**: ${bundle.entityNote.label}${bundle.entityNote.content ? '\n' + bundle.entityNote.content.split('\n').map((l) => `  - ${l}`).join('\n') : ''}`);
+      lines.push(`- **Command**: ${bundle.commandNote.label}${bundle.commandNote.content ? ' — ' + bundle.commandNote.content : ''}`);
+      lines.push(`- **Event**: ${bundle.eventNote.label}${bundle.eventNote.content ? ' — ' + bundle.eventNote.content : ''}`);
+      lines.push('');
+    }
+  }
+
+  // Connections section
+  if (board.links && board.links.length > 0) {
+    lines.push('## Connections');
+    lines.push('');
+    for (const link of board.links) {
+      const fromLabel = getLabelForId(link.fromId, board.notes, board.bundles);
+      const toLabel = getLabelForId(link.toId, board.notes, board.bundles);
+      const labelPart = link.label ? ` _(${link.label})_` : '';
+      lines.push(`- [${fromLabel}] → [${toLabel}]${labelPart}`);
+    }
+    lines.push('');
+  }
+
+  const notesSortedByX = [...board.notes].sort(
+    (a, b) => a.position.x - b.position.x
+  );
+
+  const regularNotes = notesSortedByX.filter((n) => n.type !== 'Diamond');
+  const diamonds = notesSortedByX.filter((n) => n.type === 'Diamond');
+
+  if (regularNotes.length > 0) {
+    lines.push(`## ${board.name}`);
+    lines.push('');
+
+    const events = regularNotes.filter((n) => n.type === 'DomainEvent');
+    const commands = regularNotes.filter((n) => n.type === 'Command');
+    const aggregates = regularNotes.filter((n) => n.type === 'Aggregate');
+    const actors = regularNotes.filter((n) => n.type === 'Actor');
+    const policies = regularNotes.filter((n) => n.type === 'Policy');
+    const externalSystems = regularNotes.filter((n) => n.type === 'ExternalSystem');
+    const readModels = regularNotes.filter((n) => n.type === 'ReadModel');
+    const hotspots = regularNotes.filter((n) => n.type === 'Hotspot');
+
+    if (events.length > 0) {
+      lines.push('### Events Flow');
+      for (let i = 1; i <= events.length; i++) {
+        const event = events[i - 1];
+        const aggregate = findNearest(event, aggregates, 'left');
+        const command = aggregate ? findNearest(aggregate, commands, 'left') : findNearest(event, commands, 'left');
+        const actor = command ? findNearest(command, actors, 'left') : null;
+        const policy = command ? findNearest(command, policies, 'left') : null;
+
+        let chain = '';
+        if (actor) chain += `[Actor: ${actor.label}] → `;
+        if (policy) chain += `[Policy: ${policy.label}] → `;
+        if (command) chain += `[Command: ${command.label}] → `;
+        if (aggregate) chain += `[Aggregate: ${aggregate.label}] → `;
+        chain += `[Event: ${event.label}]`;
+
+        lines.push(`${i}. ${chain}`);
+      }
+      lines.push('');
+    }
+
+    if (externalSystems.length > 0) {
+      lines.push('### External Systems');
+      for (const s of externalSystems) {
+        lines.push(`- 🔌 ${s.label}`);
+      }
+      lines.push('');
+    }
+
+    if (readModels.length > 0) {
+      lines.push('### Read Models');
+      for (const r of readModels) {
+        lines.push(`- 📊 ${r.label}`);
+      }
+      lines.push('');
+    }
+
+    if (hotspots.length > 0) {
+      lines.push('### Hotspots');
+      for (const h of hotspots) {
+        lines.push(`- ❓ ${h.label}`);
+      }
+      lines.push('');
+    }
+
+    lines.push('### All Elements');
+    for (const note of regularNotes) {
+      lines.push(`- ${getTypeEmoji(note.type)} **[${note.type}]** ${note.label}`);
+    }
+    lines.push('');
+  }
+
+  if (diamonds.length > 0) {
+    lines.push('## Comments & Hotspots');
+    lines.push('');
+    for (const d of diamonds) {
+      lines.push(`- ◆ ${d.label}`);
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
