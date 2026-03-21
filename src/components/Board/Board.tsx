@@ -6,7 +6,7 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
+import type { DragEndEvent, DragStartEvent, DropAnimation } from '@dnd-kit/core';
 import { v4 as uuidv4 } from 'uuid';
 import { BoardCanvas } from './BoardCanvas';
 import { DetailPanel } from '../DetailPanel/DetailPanel';
@@ -17,6 +17,23 @@ import type { StickyNote as StickyNoteType, Bundle } from '../../types/elements'
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { screenToCanvas } from '../../utils/positionUtils';
 import { COLLAPSED_BUNDLE_W, COLLAPSED_BUNDLE_H } from '../../utils/linkUtils';
+
+// Drop animation: DragOverlay shrinks back and fades out in place (no "fly back" effect)
+const DRAG_DROP_ANIMATION: DropAnimation = {
+  keyframes: ({ transform }) => [
+    {
+      transform: `translate3d(${transform.initial.x}px, ${transform.initial.y}px, 0) scale(1.05) rotate(1.5deg)`,
+      opacity: 0.45,
+    },
+    {
+      transform: `translate3d(${transform.final.x}px, ${transform.final.y}px, 0) scale(1) rotate(0deg)`,
+      opacity: 0,
+    },
+  ],
+  duration: 200,
+  easing: 'ease',
+  sideEffects: null,
+};
 
 export const Board: React.FC = () => {
   const { addNote, updateNote, addBundle, updateBundle, addLink, collapseAllBundles, expandAllBundles } = useBoardStore();
@@ -308,21 +325,29 @@ export const Board: React.FC = () => {
         </div>
       </div>
 
-      <DragOverlay dropAnimation={null}>
+      <DragOverlay dropAnimation={DRAG_DROP_ANIMATION}>
         {activeNote && (() => {
           const cfg = ELEMENT_CONFIGS[activeNote.type];
           const w = activeNote.size.width * zoom;
           const h = activeNote.size.height * zoom;
+          const DRAG_TRANSFORM = 'scale(1.05) rotate(1.5deg)';
+          const DRAG_SHADOW = '0 8px 24px rgba(0,0,0,0.2)';
           if (activeNote.type === 'Diamond') {
             return (
-              <div style={{ width: w, height: h, opacity: 0.45, position: 'relative' }}>
+              <div style={{
+                width: w,
+                height: h,
+                opacity: 0.45,
+                position: 'relative',
+                transform: DRAG_TRANSFORM,
+                filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.2))',
+              }}>
                 <div style={{
                   width: w,
                   height: h,
                   transform: 'rotate(45deg)',
                   backgroundColor: cfg.color,
                   borderRadius: 8 * zoom,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
@@ -351,18 +376,21 @@ export const Board: React.FC = () => {
               borderRadius: 6,
               padding: 8,
               fontSize: 13 * zoom,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+              boxShadow: DRAG_SHADOW,
               opacity: 0.45,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontWeight: 600,
+              transform: DRAG_TRANSFORM,
             }}>
               {activeNote.label}
             </div>
           );
         })()}
         {activeBundle && (() => {
+          const DRAG_TRANSFORM = 'scale(1.05) rotate(1.5deg)';
+          const DRAG_SHADOW = '0 8px 24px rgba(0,0,0,0.2)';
           if (activeBundle.collapsed) {
             const w = COLLAPSED_BUNDLE_W * zoom;
             const h = COLLAPSED_BUNDLE_H * zoom;
@@ -371,10 +399,11 @@ export const Board: React.FC = () => {
                 width: w, height: h,
                 backgroundColor: '#FF8C00', color: 'white',
                 borderRadius: 6, opacity: 0.45,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                boxShadow: DRAG_SHADOW,
                 display: 'flex', flexDirection: 'column', justifyContent: 'center',
                 padding: `${6 * zoom}px ${12 * zoom}px`,
                 overflow: 'hidden',
+                transform: DRAG_TRANSFORM,
               }}>
                 {activeBundle.infoNote.label && (
                   <div style={{ fontSize: 10 * zoom, opacity: 0.75, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 * zoom }}>
@@ -422,7 +451,14 @@ export const Board: React.FC = () => {
             </div>
           );
           return (
-            <div style={{ width: totalW, height: totalH, position: 'relative', opacity: 0.45 }}>
+            <div style={{
+              width: totalW,
+              height: totalH,
+              position: 'relative',
+              opacity: 0.45,
+              transform: DRAG_TRANSFORM,
+              filter: `drop-shadow(${DRAG_SHADOW})`,
+            }}>
               <SubCard bgColor="#FFD600" textColor="#333" label={activeBundle.infoNote.label}    left={SUB_W + GAP}       top={0} />
               <SubCard bgColor="#43A047" textColor="#fff" label={activeBundle.entityNote.label}  left={0}                 top={SUB_H + GAP} />
               <SubCard bgColor="#1E88E5" textColor="#fff" label={activeBundle.commandNote.label} left={SUB_W + GAP}       top={SUB_H + GAP} />
