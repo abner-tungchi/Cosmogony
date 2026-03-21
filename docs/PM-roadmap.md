@@ -69,7 +69,7 @@
 |---------|------|-----------|------|------|
 | FE-003 | 實作 Fit All（自適應縮放） | frontend-engineer | — | ✅ 完成 |
 | FE-005 | 實作 Minimap（小地圖導航） | frontend-engineer | — | ✅ 完成 |
-| FE-004 | 實作 Phase Lane（階段泳道） | frontend-engineer | BE-001 | 待開始 |
+| FE-004 | 實作 Phase Lane（階段泳道） | frontend-engineer | BE-001 | ✅ 完成 |
 
 ### Phase 3 — AI 協作強化（Should Have）
 
@@ -81,9 +81,9 @@
 
 | 任務 ID | 標題 | 負責 Agent | 依賴 | 狀態 |
 |---------|------|-----------|------|------|
-| FE-006 | 拖曳微旋轉動畫效果 | frontend-engineer | — | 待開始 |
-| FE-007 | 鍵盤快捷鍵與底部提示列 | frontend-engineer | — | 待開始 |
-| FE-008 | Event 計數統計顯示 | frontend-engineer | — | 待開始 |
+| FE-006 | 拖曳微旋轉動畫效果 | frontend-engineer | — | ✅ 完成 |
+| FE-007 | 鍵盤快捷鍵與底部提示列 | frontend-engineer | — | ✅ 完成 |
+| FE-008 | Event 計數統計顯示 | frontend-engineer | — | ✅ 完成 |
 
 ---
 
