@@ -6,6 +6,7 @@ import { StickyNote } from '../StickyNote/StickyNote';
 import { Bundle } from '../Bundle/Bundle';
 import { LinkLayer } from '../Links/LinkLayer';
 import type { FlowPath } from '../../types/elements';
+import { PhaseLane } from './PhaseLane';
 
 interface Props {
   selectedNoteIds: string[];
@@ -113,6 +114,9 @@ export const BoardCanvas: React.FC<Props> = ({
           left: 0,
         }}
       >
+        {/* Phase Lanes — rendered at bottom layer, zIndex 0 */}
+        <PhaseLane notes={activeBoard.notes} bundles={activeBoard.bundles} />
+
         {/* Bundles */}
         {activeBoard.bundles.map((bundle) => (
           <Bundle
