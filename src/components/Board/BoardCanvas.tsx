@@ -21,7 +21,7 @@ export const BoardCanvas: React.FC<Props> = ({
   onDetailClick,
 }) => {
   const activeBoard = useBoardStore(selectActiveBoard);
-  const { zoom, panX, panY, setZoom, setPan, activePath } = useUIStore();
+  const { zoom, panX, panY, setZoom, setPan, activePath, fitAll } = useUIStore();
   const allPaths: FlowPath[] = activeBoard.flowPaths;
 
   // Calculate empty state: filtering is active but no elements belong to this path
@@ -71,6 +71,29 @@ export const BoardCanvas: React.FC<Props> = ({
     el.addEventListener('wheel', handler, { passive: false });
     return () => el.removeEventListener('wheel', handler);
   }, []);
+
+  // F key shortcut: Fit All — skip when focus is on input/textarea
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'f' && e.key !== 'F') return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
+
+      const viewport = containerRef.current;
+      if (!viewport) return;
+      const { width, height } = viewport.getBoundingClientRect();
+
+      fitAll({
+        notes: activeBoard.notes,
+        bundles: activeBoard.bundles,
+        viewportWidth: width,
+        viewportHeight: height,
+      });
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [fitAll, activeBoard.notes, activeBoard.bundles]);
 
   return (
     <div

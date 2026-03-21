@@ -26,7 +26,7 @@ const iconMap: Record<string, string> = {
 export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, currentView }) => {
   const {
     activeToolType, setActiveToolType,
-    zoom, setZoom, resetView,
+    zoom, setZoom, resetView, fitAll,
     isLinkingMode, setLinkingMode,
     selectedNoteIds, setSelectedNoteIds,
     setCurrentView,
@@ -80,6 +80,17 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
       setLinkingMode(false);
       setActiveToolType(activeToolType === type ? null : type);
     }
+  };
+
+  const handleFitAll = () => {
+    const viewport = document.getElementById('board-canvas-viewport');
+    const rect = viewport?.getBoundingClientRect();
+    fitAll({
+      notes: activeBoard.notes,
+      bundles: activeBoard.bundles,
+      viewportWidth: rect?.width ?? window.innerWidth,
+      viewportHeight: rect?.height ?? window.innerHeight,
+    });
   };
 
   const sectionLabel = (text: string) =>
@@ -435,11 +446,13 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
           </span>
           <button onClick={() => setZoom(zoom + 0.1)} style={smallBtn}>+</button>
           <button onClick={resetView} style={{ ...smallBtn, marginLeft: 4 }} title="Reset view">⌂</button>
+          <button onClick={handleFitAll} style={{ ...smallBtn, marginLeft: 2 }} title="Fit All (F)">⊡</button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 0' }}>
           <button onClick={() => setZoom(zoom - 0.1)} style={smallBtn} title="Zoom out">−</button>
           <button onClick={resetView} style={smallBtn} title="Reset view">⌂</button>
+          <button onClick={handleFitAll} style={smallBtn} title="Fit All (F)">⊡</button>
           <button onClick={() => setZoom(zoom + 0.1)} style={smallBtn} title="Zoom in">+</button>
         </div>
       )}
