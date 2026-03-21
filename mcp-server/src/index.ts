@@ -774,6 +774,112 @@ Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty)
   }
 );
 
+// ─── Batch path / phase tools ───────────────────────────────────────────────
+
+server.tool(
+  'es_set_event_paths',
+  `Batch-assign FlowPath IDs to multiple bundles and/or notes in one call (overwrites existing paths — not append).
+Searches both bundles[] and notes[] so you can mix IDs freely.
+Returns { updated: string[], notFound: string[] }.`,
+  {
+    ids: z.array(z.string()).describe('Bundle or Note IDs to update'),
+    paths: z.array(z.string()).describe('FlowPath IDs to assign (replaces existing paths)'),
+  },
+  async ({ ids, paths }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const now = new Date().toISOString();
+
+    const updated: string[] = [];
+    const notFound: string[] = [];
+
+    for (const id of ids) {
+      const bundle = board.bundles.find(b => b.id === id);
+      if (bundle) {
+        bundle.paths = paths;
+        bundle.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
+      const note = board.notes.find(n => n.id === id);
+      if (note) {
+        note.paths = paths;
+        note.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
+      notFound.push(id);
+    }
+
+    if (updated.length > 0) {
+      board.updatedAt = now;
+      projectState.updatedAt = now;
+      saveProject();
+      await syncProjectToRelay();
+      await broadcast('set_event_paths', { ids: updated, paths });
+    }
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ updated, notFound }),
+      }],
+    };
+  }
+);
+
+server.tool(
+  'es_set_event_phase',
+  `Batch-assign a phase label to multiple bundles and/or notes in one call (overwrites existing phase).
+Searches both bundles[] and notes[] so you can mix IDs freely.
+Returns { updated: string[], notFound: string[] }.`,
+  {
+    ids: z.array(z.string()).describe('Bundle or Note IDs to update'),
+    phase: z.string().describe('Phase label to assign (e.g. "Discovery", "Order Processing")'),
+  },
+  async ({ ids, phase }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const now = new Date().toISOString();
+
+    const updated: string[] = [];
+    const notFound: string[] = [];
+
+    for (const id of ids) {
+      const bundle = board.bundles.find(b => b.id === id);
+      if (bundle) {
+        bundle.phase = phase;
+        bundle.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
+      const note = board.notes.find(n => n.id === id);
+      if (note) {
+        note.phase = phase;
+        note.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
+      notFound.push(id);
+    }
+
+    if (updated.length > 0) {
+      board.updatedAt = now;
+      projectState.updatedAt = now;
+      saveProject();
+      await syncProjectToRelay();
+      await broadcast('set_event_phase', { ids: updated, phase });
+    }
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ updated, notFound }),
+      }],
+    };
+  }
+);
+
 // ─── FlowPath tools ──────────────────────────────────────────────────────────
 
 server.tool(
