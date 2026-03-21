@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
-import { useBoardStore } from '../../store/boardStore';
+import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
 
 export const TabBar: React.FC = () => {
   const { project, setActiveBoard, addBoard, closeBoard, renameBoard } = useBoardStore();
-  const { currentView, setCurrentView } = useUIStore();
+  const activeBoard = useBoardStore(selectActiveBoard);
+  const { currentView, setCurrentView, activePath } = useUIStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +44,17 @@ export const TabBar: React.FC = () => {
   };
 
   const isHome = currentView === 'home';
+
+  // Event count statistics — reactive to activePath and activeBoard
+  const totalEvents = activeBoard.notes.filter((n) => n.type === 'DomainEvent').length;
+  const totalBundles = activeBoard.bundles.length;
+  const visibleEvents = activePath !== null
+    ? activeBoard.notes.filter((n) => n.type === 'DomainEvent' && n.paths?.includes(activePath)).length
+    : totalEvents;
+  const visibleBundles = activePath !== null
+    ? activeBoard.bundles.filter((b) => b.paths?.includes(activePath)).length
+    : totalBundles;
+  const showStats = currentView === 'board';
 
   return (
     <div
@@ -172,6 +184,37 @@ export const TabBar: React.FC = () => {
       >
         +
       </button>
+
+      {/* Board statistics chip — visible only when viewing a board */}
+      {showStats && (
+        <div
+          style={{
+            marginLeft: 'auto',
+            display: 'flex',
+            alignItems: 'center',
+            paddingRight: 14,
+            paddingLeft: 8,
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              color: activePath !== null ? '#93c5fd' : '#64748b',
+              background: activePath !== null ? 'rgba(59,130,246,0.12)' : 'transparent',
+              borderRadius: 4,
+              padding: activePath !== null ? '2px 7px' : '2px 0',
+              letterSpacing: '0.02em',
+              whiteSpace: 'nowrap',
+              transition: 'color 0.15s, background 0.15s',
+            }}
+          >
+            {visibleEvents} / {totalEvents} events
+            <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>
+            {visibleBundles} / {totalBundles} bundles
+          </span>
+        </div>
+      )}
     </div>
   );
 };
