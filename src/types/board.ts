@@ -1,4 +1,4 @@
-import type { StickyNote, Bundle, Link } from './elements';
+import type { StickyNote, Bundle, Link, FlowPath } from './elements';
 
 export interface Board {
   id: string;
@@ -6,6 +6,7 @@ export interface Board {
   notes: StickyNote[];
   bundles: Bundle[];
   links: Link[];
+  flowPaths: FlowPath[];
   createdAt: string;
   updatedAt: string;
 }
@@ -35,6 +36,9 @@ export interface UIState {
 export interface BoardStore {
   project: Project;
 
+  // Load entire project (e.g. from server on first connect)
+  loadProject: (project: Project) => void;
+
   // Project management
   setProjectName: (name: string) => void;
   setBoardName: (name: string) => void; // legacy alias
@@ -55,4 +59,12 @@ export interface BoardStore {
   addLink: (link: Link) => void;
   deleteLink: (id: string) => void;
   clearBoard: () => void;
+  expandNoteToBundle: (noteId: string) => void;
+  collapseAllBundles: () => void;
+  expandAllBundles: () => void;
+
+  // FlowPath management (active board)
+  addFlowPath: (flowPath: FlowPath) => void;
+  updateFlowPath: (id: string, updates: Partial<FlowPath>) => void;
+  deleteFlowPath: (id: string) => void;
 }

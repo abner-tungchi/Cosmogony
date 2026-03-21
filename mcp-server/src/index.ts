@@ -14,6 +14,18 @@ type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
   | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot' | 'Diamond';
 
+interface Policy {
+  rule: string;
+  severity: 'block' | 'warn';
+}
+
+interface FlowPath {
+  id: string;
+  name: string;
+  color: string;
+  description?: string;
+}
+
 interface StickyNote {
   id: string;
   type: ElementType;
@@ -21,6 +33,9 @@ interface StickyNote {
   position: { x: number; y: number };
   size: { width: number; height: number };
   zIndex: number;
+  paths?: string[];
+  phase?: string;
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -38,6 +53,14 @@ interface Bundle {
   commandNote: BundleSubNote;
   eventNote: BundleSubNote;
   zIndex: number;
+  collapsed?: boolean;
+  policies?: Policy[];
+  paths?: string[];
+  phase?: string;
+  trigger?: string;
+  uiDescription?: string;
+  readModels?: string[];
+  notes?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +81,7 @@ interface Board {
   notes: StickyNote[];
   bundles: Bundle[];
   links: Link[];
+  flowPaths: FlowPath[];
   createdAt: string;
   updatedAt: string;
 }
@@ -91,15 +115,33 @@ function createBoard(name: string): Board {
     notes: [],
     bundles: [],
     links: [],
+    flowPaths: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
 }
 
+/** Migrate loaded project.json to ensure all new optional fields exist. */
+function migrateProject(p: Project): Project {
+  for (const board of p.boards) {
+    const b = board as Board & { flowPaths?: FlowPath[] };
+    if (!b.flowPaths) b.flowPaths = [];
+    for (const bundle of board.bundles) {
+      if (!bundle.paths) bundle.paths = [];
+      if (!bundle.policies) bundle.policies = [];
+    }
+    for (const note of board.notes) {
+      if (!note.paths) note.paths = [];
+    }
+  }
+  return p;
+}
+
 let projectState: Project = (() => {
   if (existsSync(PROJECT_FILE)) {
     try {
-      return JSON.parse(readFileSync(PROJECT_FILE, 'utf-8')) as Project;
+      const loaded = JSON.parse(readFileSync(PROJECT_FILE, 'utf-8')) as Project;
+      return migrateProject(loaded);
     } catch {}
   }
   const defaultBoard = createBoard('Default Context');
@@ -127,7 +169,7 @@ function nextBundleX(): number {
 
 // ─── SSE subscribers ───────────────────────────────────────────────────────
 
-const subscribers = new Set<Response>();
+const subscribers = new Map<string, Response>();
 
 // ─── Relay mode helpers ────────────────────────────────────────────────────
 
@@ -135,18 +177,22 @@ let expressReady = false;
 const RELAY_BASE = process.env.ES_RELAY_BASE ?? 'http://localhost:3333';
 const FORCE_RELAY = process.env.ES_RELAY_MODE === 'true';
 
-async function broadcast(action: string, payload: unknown): Promise<void> {
+function broadcastExcept(action: string, payload: unknown, excludeId?: string): void {
   const body = JSON.stringify({ action, payload });
+  for (const [id, res] of subscribers) {
+    if (id !== excludeId) res.write(`data: ${body}\n\n`);
+  }
+}
+
+async function broadcast(action: string, payload: unknown, excludeId?: string): Promise<void> {
   if (expressReady) {
-    for (const res of subscribers) {
-      res.write(`data: ${body}\n\n`);
-    }
+    broadcastExcept(action, payload, excludeId);
   } else {
     try {
       await fetch(`${RELAY_BASE}/api/broadcast`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body,
+        body: JSON.stringify({ action, payload, excludeClientId: excludeId }),
       });
     } catch {
       // Silent — other server may not be running
@@ -170,7 +216,7 @@ async function loadProjectFromRelay(): Promise<void> {
   if (!expressReady) {
     try {
       const res = await fetch(`${RELAY_BASE}/api/board`);
-      if (res.ok) projectState = (await res.json()) as Project;
+      if (res.ok) projectState = migrateProject((await res.json()) as Project);
     } catch {}
   }
 }
@@ -188,19 +234,22 @@ app.get('/api/events', (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
-  subscribers.add(res);
+  const clientId = (req.query.clientId as string | undefined) ?? `anon-${uuidv4()}`;
+  subscribers.set(clientId, res);
   const heartbeat = setInterval(() => res.write(': heartbeat\n\n'), 30000);
   req.on('close', () => {
     clearInterval(heartbeat);
-    subscribers.delete(res);
+    subscribers.delete(clientId);
   });
 });
 
 // React syncs project state here
 app.post('/api/board', (req: Request, res: Response) => {
   if (req.body && typeof req.body === 'object') {
-    projectState = req.body as Project;
+    const senderClientId = req.headers['x-client-id'] as string | undefined;
+    projectState = migrateProject(req.body as Project);
     saveProject();
+    broadcastExcept('sync_project', projectState, senderClientId);
   }
   res.json({ ok: true });
 });
@@ -212,11 +261,8 @@ app.get('/api/board', (_req: Request, res: Response) => {
 
 // Relay broadcast endpoint
 app.post('/api/broadcast', (req: Request, res: Response) => {
-  const { action, payload } = req.body as { action: string; payload: unknown };
-  const data = JSON.stringify({ action, payload });
-  for (const sub of subscribers) {
-    sub.write(`data: ${data}\n\n`);
-  }
+  const { action, payload, excludeClientId } = req.body as { action: string; payload: unknown; excludeClientId?: string };
+  broadcastExcept(action, payload, excludeClientId);
   res.json({ ok: true });
 });
 
@@ -243,7 +289,7 @@ if (FORCE_RELAY) {
 
 const server = new McpServer({
   name: 'event-storming',
-  version: '2.0.0',
+  version: '2.1.0',
 });
 
 // ─── Context (Board) management tools ──────────────────────────────────────
@@ -280,6 +326,7 @@ server.tool(
         noteCount: b.notes.length,
         bundleCount: b.bundles.length,
         linkCount: b.links.length,
+        flowPathCount: b.flowPaths.length,
         updatedAt: b.updatedAt,
       })),
     };
@@ -293,19 +340,10 @@ server.tool(
   { name: z.string().describe('Name of the new Bounded Context') },
   async ({ name }) => {
     await loadProjectFromRelay();
-    const now = new Date().toISOString();
-    const newBoard: Board = {
-      id: uuidv4(),
-      name,
-      notes: [],
-      bundles: [],
-      links: [],
-      createdAt: now,
-      updatedAt: now,
-    };
+    const newBoard = createBoard(name);
     projectState.boards.push(newBoard);
     projectState.activeBoardId = newBoard.id;
-    projectState.updatedAt = now;
+    projectState.updatedAt = newBoard.createdAt;
     saveProject();
     await syncProjectToRelay();
     await broadcast('add_board', { id: newBoard.id, name });
@@ -436,8 +474,11 @@ Layout guide:
     label: z.string().describe('Text label for the note'),
     x: z.number().describe('X position in canvas coordinates'),
     y: z.number().describe('Y position in canvas coordinates'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this note belongs to'),
+    phase: z.string().optional().describe('Phase or stage label for this note'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ type, label, x, y }) => {
+  async ({ type, label, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const now = new Date().toISOString();
     const note: StickyNote = {
@@ -447,6 +488,9 @@ Layout guide:
       position: { x, y },
       size: { width: 160, height: 80 },
       zIndex: 1,
+      paths: paths ?? [],
+      phase,
+      notes,
       createdAt: now,
       updatedAt: now,
     };
@@ -469,8 +513,11 @@ server.tool(
     label: z.string().optional().describe('New label text'),
     x: z.number().optional().describe('New X position'),
     y: z.number().optional().describe('New Y position'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this note belongs to'),
+    phase: z.string().optional().describe('Phase or stage label for this note'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ id, label, x, y }) => {
+  async ({ id, label, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const note = board.notes.find(n => n.id === id);
@@ -478,12 +525,15 @@ server.tool(
     if (label !== undefined) note.label = label;
     if (x !== undefined) note.position.x = x;
     if (y !== undefined) note.position.y = y;
+    if (paths !== undefined) note.paths = paths;
+    if (phase !== undefined) note.phase = phase;
+    if (notes !== undefined) note.notes = notes;
     note.updatedAt = new Date().toISOString();
     board.updatedAt = note.updatedAt;
     projectState.updatedAt = note.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_note', { id, label, x, y });
+    await broadcast('update_note', { id, label, x, y, paths, phase, notes });
     return { content: [{ type: 'text' as const, text: 'Note updated.' }] };
   }
 );
@@ -529,8 +579,18 @@ Layout:
     commandContent: z.string().describe('Content for the Command sub-note'),
     eventLabel: z.string().describe('Label for the DomainEvent (orange, bottom-right) sub-note'),
     eventContent: z.string().describe('Content for the DomainEvent sub-note'),
+    policies: z.array(z.object({
+      rule: z.string().describe('Business rule description'),
+      severity: z.enum(['block', 'warn']).describe('block = hard constraint, warn = advisory'),
+    })).optional().describe('Business policies / rules attached to this bundle'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this bundle belongs to'),
+    phase: z.string().optional().describe('Phase or stage label (e.g. "Discovery", "Order Processing")'),
+    trigger: z.string().optional().describe('What triggers this command (e.g. "User clicks Submit", "Policy: X")'),
+    uiDescription: z.string().optional().describe('Description of the UI interaction or screen context'),
+    readModels: z.array(z.string()).optional().describe('Read model names that inform this command decision'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent }) => {
+  async ({ x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes }) => {
     await loadProjectFromRelay();
     const posX = x ?? nextBundleX();
     const posY = y ?? 200;
@@ -543,6 +603,13 @@ Layout:
       commandNote: { label: commandLabel, content: commandContent },
       eventNote: { label: eventLabel, content: eventContent },
       zIndex: 1,
+      policies: policies ?? [],
+      paths: paths ?? [],
+      phase,
+      trigger,
+      uiDescription,
+      readModels,
+      notes,
       createdAt: now,
       updatedAt: now,
     };
@@ -559,7 +626,7 @@ Layout:
 
 server.tool(
   'es_update_bundle',
-  'Update any sub-note labels/contents or position of an existing Bundle. All fields except id are optional.',
+  'Update any sub-note labels/contents, position, or metadata of an existing Bundle. All fields except id are optional.',
   {
     id: z.string().describe('Bundle ID to update'),
     x: z.number().optional().describe('New X position'),
@@ -572,8 +639,18 @@ server.tool(
     commandContent: z.string().optional(),
     eventLabel: z.string().optional(),
     eventContent: z.string().optional(),
+    policies: z.array(z.object({
+      rule: z.string().describe('Business rule description'),
+      severity: z.enum(['block', 'warn']).describe('block = hard constraint, warn = advisory'),
+    })).optional().describe('Replace all policies on this bundle'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this bundle belongs to'),
+    phase: z.string().optional().describe('Phase or stage label'),
+    trigger: z.string().optional().describe('What triggers this command'),
+    uiDescription: z.string().optional().describe('Description of the UI interaction or screen context'),
+    readModels: z.array(z.string()).optional().describe('Read model names that inform this command decision'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent }) => {
+  async ({ id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const bundle = board.bundles.find(b => b.id === id);
@@ -588,12 +665,19 @@ server.tool(
     if (commandContent !== undefined) bundle.commandNote.content = commandContent;
     if (eventLabel !== undefined) bundle.eventNote.label = eventLabel;
     if (eventContent !== undefined) bundle.eventNote.content = eventContent;
+    if (policies !== undefined) bundle.policies = policies;
+    if (paths !== undefined) bundle.paths = paths;
+    if (phase !== undefined) bundle.phase = phase;
+    if (trigger !== undefined) bundle.trigger = trigger;
+    if (uiDescription !== undefined) bundle.uiDescription = uiDescription;
+    if (readModels !== undefined) bundle.readModels = readModels;
+    if (notes !== undefined) bundle.notes = notes;
     bundle.updatedAt = new Date().toISOString();
     board.updatedAt = bundle.updatedAt;
     projectState.updatedAt = bundle.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_bundle', { id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent });
+    await broadcast('update_bundle', { id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes });
     return { content: [{ type: 'text' as const, text: 'Bundle updated.' }] };
   }
 );
@@ -655,6 +739,8 @@ Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty)
         commandNote: { label: s.commandLabel, content: s.commandContent ?? '' },
         eventNote: { label: s.eventLabel, content: s.eventContent ?? '' },
         zIndex: 1,
+        policies: [],
+        paths: [],
         createdAt: now,
         updatedAt: now,
       };
@@ -685,6 +771,58 @@ Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty)
 
     const result = createdIds.map((id, index) => ({ id, index }));
     return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+// ─── FlowPath tools ──────────────────────────────────────────────────────────
+
+server.tool(
+  'es_add_flow_path',
+  `Add a named FlowPath definition to the active Bounded Context. Returns { id }.
+FlowPaths are color-coded path markers used to categorize Bundles and Notes into named flows
+(e.g. "Happy Path", "Error Path", "Admin Flow"). After creating a FlowPath, assign its id
+to bundles/notes via es_update_bundle or es_update_note paths field.`,
+  {
+    name: z.string().describe('Display name for this flow path (e.g. "Happy Path", "Error Flow")'),
+    color: z.string().describe('CSS color string for this path (e.g. "#4CAF50", "blue", "hsl(120,60%,50%)")'),
+    description: z.string().optional().describe('Optional description of when/why this path is taken'),
+  },
+  async ({ name, color, description }) => {
+    await loadProjectFromRelay();
+    const now = new Date().toISOString();
+    const flowPath: FlowPath = {
+      id: uuidv4(),
+      name,
+      color,
+      description,
+    };
+    const board = getActiveBoard();
+    board.flowPaths.push(flowPath);
+    board.updatedAt = now;
+    projectState.updatedAt = now;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('add_flow_path', flowPath);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ id: flowPath.id }) }] };
+  }
+);
+
+server.tool(
+  'es_delete_flow_path',
+  'Delete a FlowPath definition from the active Bounded Context by ID. Note: this does NOT remove the path id from bundles/notes that reference it.',
+  { id: z.string().describe('FlowPath ID to delete') },
+  async ({ id }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const exists = board.flowPaths.some(fp => fp.id === id);
+    if (!exists) return { content: [{ type: 'text' as const, text: `FlowPath ${id} not found.` }] };
+    board.flowPaths = board.flowPaths.filter(fp => fp.id !== id);
+    board.updatedAt = new Date().toISOString();
+    projectState.updatedAt = board.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('delete_flow_path', { id });
+    return { content: [{ type: 'text' as const, text: `FlowPath ${id} deleted.` }] };
   }
 );
 

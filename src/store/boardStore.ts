@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
 import type { Board, Project, BoardStore } from '../types/board';
-import type { StickyNote, Bundle, Link } from '../types/elements';
+import type { StickyNote, Bundle, Link, FlowPath } from '../types/elements';
 
 function createBoard(name: string): Board {
   return {
@@ -12,6 +12,7 @@ function createBoard(name: string): Board {
     notes: [],
     bundles: [],
     links: [],
+    flowPaths: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -36,6 +37,11 @@ export const useBoardStore = create<BoardStore>()(
   persist(
     immer((set) => ({
       project: initialProject,
+
+      loadProject: (project) =>
+        set((state) => {
+          state.project = project;
+        }),
 
       setProjectName: (name) =>
         set((state) => {
@@ -203,10 +209,97 @@ export const useBoardStore = create<BoardStore>()(
             state.project.updatedAt = board.updatedAt;
           }
         }),
+
+      collapseAllBundles: () =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const now = new Date().toISOString();
+          for (const bundle of board.bundles) {
+            bundle.collapsed = true;
+            bundle.updatedAt = now;
+          }
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      expandAllBundles: () =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const now = new Date().toISOString();
+          for (const bundle of board.bundles) {
+            bundle.collapsed = false;
+            bundle.updatedAt = now;
+          }
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      expandNoteToBundle: (noteId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || note.type !== 'DomainEvent') return;
+          const now = new Date().toISOString();
+          const bundle: Bundle = {
+            id: uuidv4(),
+            position: { x: note.position.x, y: note.position.y },
+            infoNote: { label: '', content: '' },
+            entityNote: { label: 'Params', content: '' },
+            commandNote: { label: '', content: '' },
+            eventNote: { label: note.label, content: '' },
+            zIndex: note.zIndex,
+            collapsed: false,
+            createdAt: now,
+            updatedAt: now,
+          };
+          board.bundles.push(bundle);
+          // Migrate links from note → bundle
+          for (const link of board.links) {
+            if (link.fromId === noteId) { link.fromId = bundle.id; link.fromType = 'bundle'; }
+            if (link.toId === noteId) { link.toId = bundle.id; link.toType = 'bundle'; }
+          }
+          board.notes = board.notes.filter((n: StickyNote) => n.id !== noteId);
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      addFlowPath: (flowPath) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (board) {
+            board.flowPaths.push(flowPath);
+            board.updatedAt = new Date().toISOString();
+            state.project.updatedAt = board.updatedAt;
+          }
+        }),
+
+      updateFlowPath: (id, updates) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const flowPath = board.flowPaths.find((fp: FlowPath) => fp.id === id);
+          if (flowPath) {
+            Object.assign(flowPath, updates);
+            board.updatedAt = new Date().toISOString();
+            state.project.updatedAt = board.updatedAt;
+          }
+        }),
+
+      deleteFlowPath: (id) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          board.flowPaths = board.flowPaths.filter((fp: FlowPath) => fp.id !== id);
+          board.updatedAt = new Date().toISOString();
+          state.project.updatedAt = board.updatedAt;
+        }),
     })),
     {
       name: 'event-storming-board',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -238,6 +331,7 @@ export const useBoardStore = create<BoardStore>()(
               .filter((b) => !b.clusterId)
               .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
             links: (oldBoard.links ?? []) as Link[],
+            flowPaths: [],
             createdAt: oldBoard.createdAt ?? now,
             updatedAt: now,
           };
@@ -252,6 +346,7 @@ export const useBoardStore = create<BoardStore>()(
               .filter((b) => b.clusterId === cluster.id)
               .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
             links: [],
+            flowPaths: [],
             createdAt: now,
             updatedAt: now,
           }));
@@ -275,6 +370,27 @@ export const useBoardStore = create<BoardStore>()(
           const s = persistedState as { project?: Project & { openBoardIds?: string[] } };
           if (s.project && !s.project.openBoardIds) {
             s.project.openBoardIds = s.project.boards.map((b) => b.id);
+          }
+          // fall through to v4 migration
+        }
+
+        if (version <= 4) {
+          // v4 → v5: add flowPaths to boards, paths to bundles/notes
+          const s = persistedState as { project?: Project };
+          if (s.project) {
+            for (const board of s.project.boards) {
+              const b = board as Board & { flowPaths?: FlowPath[] };
+              if (!b.flowPaths) b.flowPaths = [];
+              for (const bundle of board.bundles) {
+                const bun = bundle as Bundle & { paths?: string[]; policies?: [] };
+                if (!bun.paths) bun.paths = [];
+                if (!bun.policies) bun.policies = [];
+              }
+              for (const note of board.notes) {
+                const n = note as StickyNote & { paths?: string[] };
+                if (!n.paths) n.paths = [];
+              }
+            }
           }
           return persistedState as BoardStore;
         }
