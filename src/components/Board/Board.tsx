@@ -1,4 +1,4 @@
-import React, { useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -10,6 +10,7 @@ import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { v4 as uuidv4 } from 'uuid';
 import { BoardCanvas } from './BoardCanvas';
 import { DetailPanel } from '../DetailPanel/DetailPanel';
+import { Minimap } from './Minimap';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
 import type { StickyNote as StickyNoteType, Bundle } from '../../types/elements';
@@ -24,7 +25,7 @@ export const Board: React.FC = () => {
     zoom, panX, panY, setPan, activeToolType, setActiveToolType,
     selectedNoteIds, setSelectedNoteIds, toggleNoteSelection,
     isLinkingMode, linkFromId, linkFromType, setLinkFrom, setLinkingMode,
-    setSelectedElement,
+    setSelectedElement, activePath,
   } = useUIStore();
 
   const isPanningRef = useRef(false);
@@ -32,6 +33,23 @@ export const Board: React.FC = () => {
   const draggedNoteStartPositions = useRef<Record<string, { x: number; y: number }>>({});
   const draggedBundleStart = useRef<{ id: string; x: number; y: number } | null>(null);
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
+
+  // Minimap: track canvas container dimensions via ResizeObserver
+  const canvasContainerRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
+
+  useEffect(() => {
+    const el = canvasContainerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        setViewportSize({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -235,6 +253,8 @@ export const Board: React.FC = () => {
       onDragEnd={handleDragEnd}
     >
       <div
+        ref={canvasContainerRef}
+        id="board-canvas-viewport"
         style={{
           position: 'absolute',
           inset: 0,
@@ -412,6 +432,16 @@ export const Board: React.FC = () => {
         })()}
       </DragOverlay>
     </DndContext>
+    <Minimap
+      notes={activeBoard.notes}
+      bundles={activeBoard.bundles}
+      zoom={zoom}
+      panX={panX}
+      panY={panY}
+      viewportWidth={viewportSize.width}
+      viewportHeight={viewportSize.height}
+      activePath={activePath}
+    />
     </>
   );
 };
