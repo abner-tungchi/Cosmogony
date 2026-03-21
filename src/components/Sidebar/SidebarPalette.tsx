@@ -8,6 +8,7 @@ import type { ElementType, Bundle, BundleSubNote } from '../../types/elements';
 interface Props {
   collapsed: boolean;
   onShowExport: () => void;
+  currentView: 'home' | 'board';
 }
 
 const iconMap: Record<string, string> = {
@@ -22,14 +23,15 @@ const iconMap: Record<string, string> = {
   Diamond: '◆',
 };
 
-export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport }) => {
+export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, currentView }) => {
   const {
     activeToolType, setActiveToolType,
     zoom, setZoom, resetView,
     isLinkingMode, setLinkingMode,
     selectedNoteIds, setSelectedNoteIds,
+    setCurrentView,
   } = useUIStore();
-  const { addBundle, deleteNote } = useBoardStore();
+  const { addBundle, deleteNote, addBoard, renameBoard, openBoard, project } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
 
   const handleBundleSelected = () => {
@@ -137,6 +139,202 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport }) => 
     );
   };
 
+  // ── Homepage sidebar ────────────────────────────────────────────────────────
+  if (currentView === 'home') {
+    // ── helpers ──
+    const getHealth = (board: typeof project.boards[0]): 'green' | 'yellow' | 'red' => {
+      if (board.notes.length === 0 && board.bundles.length === 0) return 'red';
+      if (board.links.length === 0) return 'yellow';
+      return 'green';
+    };
+
+    const HEALTH_DOT: Record<'green' | 'yellow' | 'red', { color: string; title: string }> = {
+      green:  { color: '#22c55e', title: 'Complete (has bundles + links)' },
+      yellow: { color: '#f59e0b', title: 'In progress (no links yet)' },
+      red:    { color: '#ef4444', title: 'Empty' },
+    };
+
+    const worstHealth = (): 'green' | 'yellow' | 'red' => {
+      const healths = project.boards.map(getHealth);
+      if (healths.includes('red'))    return 'red';
+      if (healths.includes('yellow')) return 'yellow';
+      return 'green';
+    };
+
+    // Notes type distribution across all boards
+    const noteTypeCounts: Partial<Record<ElementType, number>> = {};
+    for (const board of project.boards) {
+      for (const note of board.notes) {
+        noteTypeCounts[note.type] = (noteTypeCounts[note.type] ?? 0) + 1;
+      }
+    }
+    const totalNotes   = Object.values(noteTypeCounts).reduce((s, n) => s + n, 0);
+    const totalBundles = project.boards.reduce((s, b) => s + b.bundles.length, 0);
+    const avgBundles   = project.boards.length > 0
+      ? (totalBundles / project.boards.length).toFixed(1)
+      : '0';
+
+    // Top types for bar + legend (sorted by count desc)
+    const sortedTypes = (Object.entries(noteTypeCounts) as [ElementType, number][])
+      .sort((a, b) => b[1] - a[1]);
+
+    const handleNew = () => {
+      const id = addBoard('New Context');
+      renameBoard(id, 'New Context');
+      setCurrentView('board');
+    };
+
+    const handleOpenContext = (id: string) => {
+      openBoard(id);
+      setCurrentView('board');
+    };
+
+    // ── collapsed view ──
+    if (collapsed) {
+      const dot = HEALTH_DOT[worstHealth()];
+      return (
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 8, gap: 4 }}>
+          <div title={`${project.boards.length} contexts`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊡</div>
+          <div title={dot.title} style={{ width: 10, height: 10, borderRadius: '50%', background: dot.color, margin: '2px auto' }} />
+          <div title={`${totalNotes} notes`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>📝</div>
+          <div title={`${totalBundles} bundles`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊞</div>
+          <div style={{ flex: 1 }} />
+          <button onClick={onShowExport} title="Export Markdown"
+            style={{ background: '#0f766e', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 16, padding: '10px 0', width: '100%' }}>
+            📤
+          </button>
+        </div>
+      );
+    }
+
+    // ── expanded view ──
+    return (
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+        {/* ── Contexts ── */}
+        {sectionLabel('Contexts')}
+
+        {project.boards.map((board) => {
+          const h = getHealth(board);
+          const dot = HEALTH_DOT[h];
+          return (
+            <button
+              key={board.id}
+              onClick={() => handleOpenContext(board.id)}
+              title={dot.title}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 12px', margin: '1px 0',
+                background: 'transparent', border: 'none',
+                cursor: 'pointer', color: '#e2e8f0',
+                fontSize: 13, textAlign: 'left', width: '100%',
+                borderRadius: 6,
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#334155'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+            >
+              {/* health dot */}
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: dot.color, flexShrink: 0 }} />
+              {/* name */}
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {board.name}
+              </span>
+              {/* counts */}
+              {(board.bundles.length > 0 || board.notes.length > 0) && (
+                <span style={{ display: 'flex', gap: 6, color: '#64748b', fontSize: 11, flexShrink: 0 }}>
+                  {board.bundles.length > 0 && <span>⊞{board.bundles.length}</span>}
+                  {board.notes.length   > 0 && <span>📝{board.notes.length}</span>}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        {/* New Context */}
+        <button
+          onClick={handleNew}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '6px 12px', margin: '4px 0 8px',
+            background: 'transparent', border: '1px dashed #334155',
+            cursor: 'pointer', color: '#64748b',
+            fontSize: 12, borderRadius: 6, width: 'calc(100% - 0px)',
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#3b82f6'; (e.currentTarget as HTMLElement).style.color = '#3b82f6'; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = '#334155'; (e.currentTarget as HTMLElement).style.color = '#64748b'; }}
+        >
+          <span>＋</span>
+          <span>New Context</span>
+        </button>
+
+        {/* ── Notes ── */}
+        {sectionLabel('Notes')}
+        <div style={{ padding: '0 12px 8px' }}>
+          {/* total */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+            <span style={{ color: '#94a3b8', fontSize: 12 }}>Total</span>
+            <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 700 }}>{totalNotes}</span>
+          </div>
+          {/* color bar */}
+          {totalNotes > 0 ? (
+            <>
+              <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
+                {sortedTypes.map(([type, count]) => (
+                  <div
+                    key={type}
+                    title={`${ELEMENT_CONFIGS[type].label}: ${count}`}
+                    style={{
+                      width: `${(count / totalNotes) * 100}%`,
+                      background: ELEMENT_CONFIGS[type].color,
+                      minWidth: count > 0 ? 2 : 0,
+                    }}
+                  />
+                ))}
+              </div>
+              {/* legend — top 4 */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 8px' }}>
+                {sortedTypes.slice(0, 4).map(([type, count]) => (
+                  <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#94a3b8' }}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: ELEMENT_CONFIGS[type].color, display: 'inline-block', flexShrink: 0 }} />
+                    {count}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{ height: 8, borderRadius: 4, background: '#334155' }} />
+          )}
+        </div>
+
+        {/* ── Bundles ── */}
+        {sectionLabel('Bundles')}
+        <div style={{ padding: '0 12px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <span style={{ color: '#94a3b8', fontSize: 12 }}>avg {avgBundles} / context</span>
+          <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 700 }}>{totalBundles}</span>
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        {/* ── Export ── */}
+        <button
+          onClick={onShowExport}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px', margin: '4px 8px 8px',
+            borderRadius: 8, border: 'none',
+            background: '#0f766e', cursor: 'pointer',
+            color: '#fff', fontSize: 13, fontWeight: 600,
+            width: 'calc(100% - 16px)', boxSizing: 'border-box' as const,
+          }}
+        >
+          <span>📤</span>
+          <span>Export Markdown</span>
+        </button>
+      </div>
+    );
+  }
+
+  // ── Board sidebar ────────────────────────────────────────────────────────────
   return (
     <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
       {sectionLabel('Elements')}

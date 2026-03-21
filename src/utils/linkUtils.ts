@@ -1,11 +1,21 @@
 import type { StickyNote, Bundle } from '../types/elements';
 
+export interface DragOffset {
+  noteIds: string[];   // note IDs currently being dragged
+  bundleIds: string[]; // bundle IDs currently being dragged
+  dx: number;          // canvas-coordinate offset (screen px / zoom)
+  dy: number;
+}
+
 // Bundle sub-note layout constants
 const SUB_NOTE_W = 160;
 const SUB_NOTE_H = 120;
 const GAP = 8;
 const BUNDLE_W = SUB_NOTE_W * 3 + GAP * 2; // 496
 const BUNDLE_H = SUB_NOTE_H * 2 + GAP;     // 248
+
+export const COLLAPSED_BUNDLE_W = 200;
+export const COLLAPSED_BUNDLE_H = 64;
 
 function getNoteBounds(note: StickyNote) {
   return {
@@ -19,13 +29,15 @@ function getNoteBounds(note: StickyNote) {
 }
 
 function getBundleBounds(bundle: Bundle) {
+  const w = bundle.collapsed ? COLLAPSED_BUNDLE_W : BUNDLE_W;
+  const h = bundle.collapsed ? COLLAPSED_BUNDLE_H : BUNDLE_H;
   return {
     left: bundle.position.x,
     top: bundle.position.y,
-    right: bundle.position.x + BUNDLE_W,
-    bottom: bundle.position.y + BUNDLE_H,
-    cx: bundle.position.x + BUNDLE_W / 2,
-    cy: bundle.position.y + BUNDLE_H / 2,
+    right: bundle.position.x + w,
+    bottom: bundle.position.y + h,
+    cx: bundle.position.x + w / 2,
+    cy: bundle.position.y + h / 2,
   };
 }
 
@@ -59,13 +71,18 @@ function getBestAnchor(from: Bounds, to: Bounds): { fx: number; fy: number; tx: 
   }
 }
 
+function shiftBounds(b: Bounds, dx: number, dy: number): Bounds {
+  return { left: b.left + dx, top: b.top + dy, right: b.right + dx, bottom: b.bottom + dy, cx: b.cx + dx, cy: b.cy + dy };
+}
+
 export function getAnchorPoints(
   fromId: string,
   fromType: 'note' | 'bundle',
   toId: string,
   toType: 'note' | 'bundle',
   notes: StickyNote[],
-  bundles: Bundle[]
+  bundles: Bundle[],
+  drag?: DragOffset | null
 ): { fx: number; fy: number; tx: number; ty: number } | null {
   let fromBounds: Bounds | null = null;
   let toBounds: Bounds | null = null;
@@ -87,5 +104,14 @@ export function getAnchorPoints(
   }
 
   if (!fromBounds || !toBounds) return null;
+
+  // Apply live drag offset so links track the element while dragging
+  if (drag) {
+    const fromIds = fromType === 'note' ? drag.noteIds : drag.bundleIds;
+    const toIds   = toType   === 'note' ? drag.noteIds : drag.bundleIds;
+    if (fromIds.includes(fromId)) fromBounds = shiftBounds(fromBounds, drag.dx, drag.dy);
+    if (toIds.includes(toId))     toBounds   = shiftBounds(toBounds,   drag.dx, drag.dy);
+  }
+
   return getBestAnchor(fromBounds, toBounds);
 }

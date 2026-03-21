@@ -1,12 +1,34 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { useDndMonitor } from '@dnd-kit/core';
 import { LinkArrow } from './LinkArrow';
 import { getAnchorPoints } from '../../utils/linkUtils';
+import type { DragOffset } from '../../utils/linkUtils';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useUIStore } from '../../store/uiStore';
 import type { Link } from '../../types/elements';
 
 export const LinkLayer: React.FC = () => {
   const activeBoard = useBoardStore(selectActiveBoard);
   const { deleteLink } = useBoardStore();
+  const { zoom, selectedNoteIds } = useUIStore();
+  const [drag, setDrag] = useState<DragOffset | null>(null);
+
+  useDndMonitor({
+    onDragMove({ active, delta }) {
+      const id = String(active.id);
+      const dx = delta.x / zoom;
+      const dy = delta.y / zoom;
+      if (id.startsWith('bundle-')) {
+        setDrag({ noteIds: [], bundleIds: [id.replace('bundle-', '')], dx, dy });
+      } else {
+        // if dragged note is selected, all selected notes move together
+        const ids = selectedNoteIds.includes(id) ? selectedNoteIds : [id];
+        setDrag({ noteIds: ids, bundleIds: [], dx, dy });
+      }
+    },
+    onDragEnd()    { setDrag(null); },
+    onDragCancel() { setDrag(null); },
+  });
 
   return (
     <svg
@@ -25,7 +47,8 @@ export const LinkLayer: React.FC = () => {
         const anchors = getAnchorPoints(
           link.fromId, link.fromType,
           link.toId, link.toType,
-          activeBoard.notes, activeBoard.bundles
+          activeBoard.notes, activeBoard.bundles,
+          drag
         );
         if (!anchors) return null;
         return (

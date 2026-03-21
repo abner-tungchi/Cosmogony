@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { SidebarPalette } from './SidebarPalette';
 import { useBoardStore } from '../../store/boardStore';
+import { useUIStore } from '../../store/uiStore';
 import { ExportModal } from '../Modals/ExportModal';
 
 interface Props {
@@ -13,6 +14,7 @@ export const Sidebar: React.FC<Props> = ({ onWidthChange }) => {
   const [editName, setEditName] = useState('');
   const [showExport, setShowExport] = useState(false);
   const { project, setProjectName } = useBoardStore();
+  const { currentView } = useUIStore();
 
   const width = collapsed ? 48 : 240;
 
@@ -130,7 +132,7 @@ export const Sidebar: React.FC<Props> = ({ onWidthChange }) => {
         </div>
 
         {/* Palette */}
-        <SidebarPalette collapsed={collapsed} onShowExport={() => setShowExport(true)} />
+        <SidebarPalette collapsed={collapsed} onShowExport={() => setShowExport(true)} currentView={currentView} />
       </div>
 
       {showExport && <ExportModal onClose={() => setShowExport(false)} />}
