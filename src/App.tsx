@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Board } from './components/Board/Board';
 import { Sidebar } from './components/Sidebar/Sidebar';
 import { TabBar } from './components/TabBar/TabBar';
+import { PathBar } from './components/PathBar/PathBar';
 import { Homepage } from './components/Homepage/Homepage';
 import { useBoardStore, selectActiveBoard } from './store/boardStore';
 import { useUIStore } from './store/uiStore';
@@ -47,7 +48,18 @@ function App() {
         }}
       >
         <TabBar />
-        <div style={{ position: 'absolute', top: 40, left: 0, right: 0, bottom: 0, overflow: 'hidden' }}>
+        {currentView === 'board' && <PathBar />}
+        <div
+          style={{
+            position: 'absolute',
+            top: currentView === 'board' ? 84 : 40,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            overflow: 'hidden',
+            transition: 'top 0.15s ease',
+          }}
+        >
           {currentView === 'home' ? (
             <Homepage />
           ) : (

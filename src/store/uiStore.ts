@@ -3,7 +3,13 @@ import type { UIState } from '../types/board';
 
 interface UIStore extends UIState {
   currentView: 'home' | 'board';
+  activePath: string | null;
+  // Detail Panel selection — intentionally not persisted
+  selectedElementId: string | null;
+  selectedElementType: 'bundle' | 'note' | null;
+
   setCurrentView: (view: 'home' | 'board') => void;
+  setActivePath: (id: string | null) => void;
   setZoom: (zoom: number) => void;
   setPan: (panX: number, panY: number) => void;
   setSelectedNoteIds: (ids: string[]) => void;
@@ -13,21 +19,30 @@ interface UIStore extends UIState {
   resetView: () => void;
   setLinkingMode: (enabled: boolean) => void;
   setLinkFrom: (id: string | null, type: 'note' | 'bundle' | null) => void;
+  setSelectedElement: (id: string | null, type: 'bundle' | 'note' | null) => void;
 }
 
 export const useUIStore = create<UIStore>((set, get) => ({
-  currentView: 'board',
+  currentView: 'home',
+  activePath: null,
+  selectedElementId: null,
+  selectedElementType: null,
   zoom: 1,
   panX: 0,
   panY: 0,
   selectedNoteIds: [],
-  activeToolType: 'DomainEvent',
+  activeToolType: null,
   isDraggingCanvas: false,
   isLinkingMode: false,
   linkFromId: null,
   linkFromType: null,
 
-  setCurrentView: (view) => set({ currentView: view }),
+  setActivePath: (id) => set({ activePath: id }),
+  setSelectedElement: (id, type) => set({ selectedElementId: id, selectedElementType: type }),
+  setCurrentView: (view) => set(view === 'board'
+    ? { currentView: view, activeToolType: null, isLinkingMode: false }
+    : { currentView: view }
+  ),
   setZoom: (zoom) => set({ zoom: Math.min(3, Math.max(0.25, zoom)) }),
   setPan: (panX, panY) => set({ panX, panY }),
   setSelectedNoteIds: (ids) => set({ selectedNoteIds: ids }),

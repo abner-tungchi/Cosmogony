@@ -1,20 +1,36 @@
 import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import type { StickyNote as StickyNoteType } from '../../types/elements';
+import type { StickyNote as StickyNoteType, FlowPath } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
+import { PathDots } from '../PathBar/PathDots';
 
 interface Props {
   note: StickyNoteType;
   isSelected: boolean;
   onSelect: (id: string, multi: boolean) => void;
   onLinkClick?: (id: string, type: 'note') => void;
+  onDetailClick?: (id: string) => void;
+  activePath?: string | null;
+  allPaths?: FlowPath[];
 }
 
-export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLinkClick }) => {
+export const StickyNote: React.FC<Props> = ({
+  note,
+  isSelected,
+  onSelect,
+  onLinkClick,
+  onDetailClick,
+  activePath = null,
+  allPaths = [],
+}) => {
   const { zoom, isLinkingMode } = useUIStore();
-  const { updateNote, deleteNote } = useBoardStore();
+
+  const isDimmed =
+    activePath !== null &&
+    !(note.paths ?? []).includes(activePath);
+  const { updateNote, deleteNote, expandNoteToBundle } = useBoardStore();
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(note.label);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -29,6 +45,13 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
     disabled: isLinkingMode || isEditing,
   });
 
+  const dimTransform = isDimmed ? ' scale(0.97)' : '';
+  const baseTransform = transform
+    ? `translate3d(${transform.x}px, ${transform.y}px, 0)${dimTransform}`
+    : isDimmed
+    ? `scale(0.97)`
+    : undefined;
+
   const style: React.CSSProperties = {
     position: 'absolute',
     left: note.position.x,
@@ -37,13 +60,13 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
     height: note.size.height,
     zIndex: isDragging ? 9999 : note.zIndex,
     // Hide original while dragging — DragOverlay shows the moving copy
-    opacity: isDragging ? 0 : 1,
-    transform: transform
-      ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-      : undefined,
-    cursor: isLinkingMode ? 'pointer' : (isDragging ? 'grabbing' : 'grab'),
+    opacity: isDragging ? 0 : isDimmed ? 0.15 : 1,
+    filter: isDimmed ? 'saturate(0.3)' : undefined,
+    transform: baseTransform,
+    cursor: isDimmed ? 'default' : isLinkingMode ? 'pointer' : (isDragging ? 'grabbing' : 'grab'),
+    pointerEvents: isDimmed ? 'none' : 'auto',
     userSelect: 'none',
-    transition: isDragging ? 'none' : 'box-shadow 0.15s',
+    transition: isDragging ? 'none' : 'opacity 200ms ease, transform 200ms ease, filter 200ms ease, box-shadow 0.15s',
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
@@ -77,6 +100,7 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
       onLinkClick?.(note.id, 'note');
     } else {
       onSelect(note.id, e.shiftKey);
+      onDetailClick?.(note.id);
     }
   };
 
@@ -137,30 +161,40 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
     </div>
   );
 
+  const actionBtnStyle: React.CSSProperties = {
+    position: 'absolute',
+    top: -8,
+    width: 20,
+    height: 20,
+    borderRadius: '50%',
+    color: 'white',
+    border: 'none',
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 12,
+    fontWeight: 'bold',
+    zIndex: 10000,
+    lineHeight: 1,
+  };
+
   const deleteBtn = isSelected && (
     <button
       onClick={(e) => { e.stopPropagation(); deleteNote(note.id); }}
-      style={{
-        position: 'absolute',
-        top: -8,
-        right: -8,
-        width: 20,
-        height: 20,
-        borderRadius: '50%',
-        background: '#ef4444',
-        color: 'white',
-        border: 'none',
-        cursor: 'pointer',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: 12,
-        fontWeight: 'bold',
-        zIndex: 10000,
-        lineHeight: 1,
-      }}
+      style={{ ...actionBtnStyle, right: -8, background: '#ef4444' }}
     >
       ×
+    </button>
+  );
+
+  const expandBtn = isSelected && note.type === 'DomainEvent' && !isLinkingMode && (
+    <button
+      onClick={(e) => { e.stopPropagation(); expandNoteToBundle(note.id); }}
+      style={{ ...actionBtnStyle, left: -8, background: '#FF8C00' }}
+      title="展開為 Bundle"
+    >
+      ⊞
     </button>
   );
 
@@ -228,6 +262,8 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
           </div>
         </div>
         {deleteBtn}
+        {expandBtn}
+        <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
       </div>
     );
   }
@@ -301,8 +337,10 @@ export const StickyNote: React.FC<Props> = ({ note, isSelected, onSelect, onLink
         </div>
       )}
 
+      <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
       {resizeHandle}
       {deleteBtn}
+      {expandBtn}
     </div>
   );
 };

@@ -9,19 +9,22 @@ import {
 import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { v4 as uuidv4 } from 'uuid';
 import { BoardCanvas } from './BoardCanvas';
+import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
 import type { StickyNote as StickyNoteType, Bundle } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { screenToCanvas } from '../../utils/positionUtils';
+import { COLLAPSED_BUNDLE_W, COLLAPSED_BUNDLE_H } from '../../utils/linkUtils';
 
 export const Board: React.FC = () => {
-  const { addNote, updateNote, addBundle, updateBundle, addLink } = useBoardStore();
+  const { addNote, updateNote, addBundle, updateBundle, addLink, collapseAllBundles, expandAllBundles } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
   const {
     zoom, panX, panY, setPan, activeToolType, setActiveToolType,
     selectedNoteIds, setSelectedNoteIds, toggleNoteSelection,
     isLinkingMode, linkFromId, linkFromType, setLinkFrom, setLinkingMode,
+    setSelectedElement,
   } = useUIStore();
 
   const isPanningRef = useRef(false);
@@ -73,8 +76,11 @@ export const Board: React.FC = () => {
       }
 
       setSelectedNoteIds([]);
-
-      if (!activeToolType) return;
+      // Close detail panel when clicking empty canvas
+      if (!activeToolType) {
+        setSelectedElement(null, null);
+        return;
+      }
 
       const canvasPos = screenToCanvas(e.clientX, e.clientY, panX, panY, zoom);
 
@@ -221,6 +227,8 @@ export const Board: React.FC = () => {
   };
 
   return (
+    <>
+    <DetailPanel />
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
@@ -241,7 +249,43 @@ export const Board: React.FC = () => {
           selectedNoteIds={selectedNoteIds}
           onNoteSelect={handleNoteSelect}
           onLinkTarget={handleLinkTarget}
+          onDetailClick={setSelectedElement}
         />
+
+        {/* Global bundle collapse/expand controls */}
+        <div style={{
+          position: 'absolute',
+          bottom: 24,
+          right: 24,
+          display: 'flex',
+          gap: 6,
+          zIndex: 100,
+        }}>
+          {(['collapse', 'expand'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => mode === 'collapse' ? collapseAllBundles() : expandAllBundles()}
+              title={mode === 'collapse' ? '全部收起 Bundle' : '全部展開 Bundle'}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '6px 12px',
+                background: 'white',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#475569',
+                boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+              }}
+            >
+              {mode === 'collapse' ? '▲' : '▼'}
+              {mode === 'collapse' ? ' 全部收起' : ' 全部展開'}
+            </button>
+          ))}
+        </div>
       </div>
 
       <DragOverlay dropAnimation={null}>
@@ -299,6 +343,36 @@ export const Board: React.FC = () => {
           );
         })()}
         {activeBundle && (() => {
+          if (activeBundle.collapsed) {
+            const w = COLLAPSED_BUNDLE_W * zoom;
+            const h = COLLAPSED_BUNDLE_H * zoom;
+            return (
+              <div style={{
+                width: w, height: h,
+                backgroundColor: '#FF8C00', color: 'white',
+                borderRadius: 6, opacity: 0.45,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                display: 'flex', flexDirection: 'column', justifyContent: 'center',
+                padding: `${6 * zoom}px ${12 * zoom}px`,
+                overflow: 'hidden',
+              }}>
+                {activeBundle.infoNote.label && (
+                  <div style={{ fontSize: 10 * zoom, opacity: 0.75, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginBottom: 2 * zoom }}>
+                    {activeBundle.infoNote.label}
+                  </div>
+                )}
+                {activeBundle.commandNote.label && (
+                  <div style={{ display: 'inline-flex', background: '#1E88E5', borderRadius: 3, padding: `${1 * zoom}px ${5 * zoom}px`, fontSize: 10 * zoom, fontWeight: 600, marginBottom: 3 * zoom, overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+                    {activeBundle.commandNote.label}
+                  </div>
+                )}
+                <div style={{ fontSize: 12 * zoom, fontWeight: 700, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {activeBundle.eventNote.label || 'Domain Event'}
+                </div>
+              </div>
+            );
+          }
+
           const SUB_W = 160 * zoom;
           const SUB_H = 120 * zoom;
           const GAP = 8 * zoom;
@@ -338,5 +412,6 @@ export const Board: React.FC = () => {
         })()}
       </DragOverlay>
     </DndContext>
+    </>
   );
 };
