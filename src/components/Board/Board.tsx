@@ -81,6 +81,8 @@ export const Board: React.FC = () => {
         setLinkFrom(null, null);
         return;
       }
+
+      // Create the visual link (always)
       addLink({
         id: uuidv4(),
         fromId: linkFromId,
@@ -89,10 +91,32 @@ export const Board: React.FC = () => {
         toType: targetType,
         createdAt: new Date().toISOString(),
       });
+
+      // Special case: Remodel ↔ Bundle — auto-populate linkedBundleIds
+      let remodelId: string | null = null;
+      let bundleId: string | null = null;
+
+      if (linkFromType === 'remodel' && targetType === 'bundle') {
+        remodelId = linkFromId;
+        bundleId = targetId;
+      } else if (linkFromType === 'bundle' && targetType === 'remodel') {
+        remodelId = targetId;
+        bundleId = linkFromId;
+      }
+
+      if (remodelId && bundleId) {
+        const remodel = activeBoard.remodels.find((r) => r.id === remodelId);
+        if (remodel && !remodel.linkedBundleIds.includes(bundleId)) {
+          updateRemodel(remodelId, {
+            linkedBundleIds: [...remodel.linkedBundleIds, bundleId],
+          });
+        }
+      }
+
       setLinkFrom(null, null);
       setLinkingMode(false);
     }
-  }, [linkFromId, linkFromType, addLink, setLinkFrom, setLinkingMode]);
+  }, [linkFromId, linkFromType, addLink, setLinkFrom, setLinkingMode, activeBoard.remodels, updateRemodel]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button === 1 || e.button === 2) {

@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
-import type { Bundle, StickyNote, Policy, FlowPath } from '../../types/elements';
+import type { Bundle, StickyNote, Policy, FlowPath, Remodel } from '../../types/elements';
+import { isUniverseRemodel } from '../../utils/remodelUtils';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -683,6 +684,508 @@ const NotePanel: React.FC<NotePanelProps> = ({ note, flowPaths }) => {
   );
 };
 
+// ─── Remodel Panel ────────────────────────────────────────────────────────────
+
+interface RemodelPanelProps {
+  remodel: Remodel;
+  flowPaths: FlowPath[];
+  allBundles: Bundle[];
+}
+
+const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBundles }) => {
+  const { updateRemodel } = useBoardStore();
+
+  // Local state for sub-note fields
+  const [aggregateLabel, setAggregateLabel] = useState(remodel.aggregateNote.label);
+  const [aggregateContent, setAggregateContent] = useState(remodel.aggregateNote.content);
+  const [parameterLabel, setParameterLabel] = useState(remodel.parameterNote.label);
+  const [parameterContent, setParameterContent] = useState(remodel.parameterNote.content);
+  const [queryLabel, setQueryLabel] = useState(remodel.queryNote.label);
+  const [queryContent, setQueryContent] = useState(remodel.queryNote.content);
+  const [sourceEventLabel, setSourceEventLabel] = useState(remodel.sourceEventNote.label);
+  const [sourceEventContent, setSourceEventContent] = useState(remodel.sourceEventNote.content);
+  const [phase, setPhase] = useState(remodel.phase ?? '');
+  const [notes, setNotes] = useState(remodel.notes ?? '');
+
+  // Linked bundles dropdown state
+  const [showBundleDropdown, setShowBundleDropdown] = useState(false);
+  const [bundleSearchQuery, setBundleSearchQuery] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sync when switching between remodels
+  useEffect(() => {
+    setAggregateLabel(remodel.aggregateNote.label);
+    setAggregateContent(remodel.aggregateNote.content);
+    setParameterLabel(remodel.parameterNote.label);
+    setParameterContent(remodel.parameterNote.content);
+    setQueryLabel(remodel.queryNote.label);
+    setQueryContent(remodel.queryNote.content);
+    setSourceEventLabel(remodel.sourceEventNote.label);
+    setSourceEventContent(remodel.sourceEventNote.content);
+    setPhase(remodel.phase ?? '');
+    setNotes(remodel.notes ?? '');
+    setShowBundleDropdown(false);
+    setBundleSearchQuery('');
+  }, [remodel.id]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!showBundleDropdown) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowBundleDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showBundleDropdown]);
+
+  const saveAggregateNote = useCallback(() => {
+    updateRemodel(remodel.id, { aggregateNote: { label: aggregateLabel, content: aggregateContent } });
+  }, [remodel.id, aggregateLabel, aggregateContent, updateRemodel]);
+
+  const saveParameterNote = useCallback(() => {
+    updateRemodel(remodel.id, { parameterNote: { label: parameterLabel, content: parameterContent } });
+  }, [remodel.id, parameterLabel, parameterContent, updateRemodel]);
+
+  const saveQueryNote = useCallback(() => {
+    updateRemodel(remodel.id, { queryNote: { label: queryLabel, content: queryContent } });
+  }, [remodel.id, queryLabel, queryContent, updateRemodel]);
+
+  const saveSourceEventNote = useCallback(() => {
+    updateRemodel(remodel.id, { sourceEventNote: { label: sourceEventLabel, content: sourceEventContent } });
+  }, [remodel.id, sourceEventLabel, sourceEventContent, updateRemodel]);
+
+  const saveMeta = useCallback(() => {
+    updateRemodel(remodel.id, { phase });
+  }, [remodel.id, phase, updateRemodel]);
+
+  const saveNotes = useCallback(() => {
+    updateRemodel(remodel.id, { notes });
+  }, [remodel.id, notes, updateRemodel]);
+
+  const togglePath = (pathId: string) => {
+    const current = remodel.paths ?? [];
+    const updated = current.includes(pathId)
+      ? current.filter((p) => p !== pathId)
+      : [...current, pathId];
+    updateRemodel(remodel.id, { paths: updated });
+  };
+
+  const removeBundleLink = (bundleId: string) => {
+    updateRemodel(remodel.id, {
+      linkedBundleIds: remodel.linkedBundleIds.filter((id) => id !== bundleId),
+    });
+  };
+
+  const addBundleLink = (bundleId: string) => {
+    updateRemodel(remodel.id, {
+      linkedBundleIds: [...remodel.linkedBundleIds, bundleId],
+    });
+    setShowBundleDropdown(false);
+    setBundleSearchQuery('');
+  };
+
+  // Universe status computed values
+  const universe = isUniverseRemodel(remodel, allBundles);
+  const linkedBundles = allBundles.filter((b) => remodel.linkedBundleIds.includes(b.id));
+  const aggregateNames = [...new Set(
+    linkedBundles.map((b) => b.infoNote.label.trim()).filter((l) => l.length > 0)
+  )];
+
+  // Bundles available to link (not yet linked)
+  const availableBundles = allBundles.filter((b) => !remodel.linkedBundleIds.includes(b.id));
+  const filteredAvailableBundles = availableBundles.filter((b) => {
+    const q = bundleSearchQuery.toLowerCase();
+    return (
+      b.infoNote.label.toLowerCase().includes(q) ||
+      b.commandNote.label.toLowerCase().includes(q) ||
+      b.eventNote.label.toLowerCase().includes(q)
+    );
+  });
+
+  const remodelPaths = remodel.paths ?? [];
+
+  return (
+    <div style={{ padding: '0 16px 24px' }}>
+      {/* Universe badge (if applicable) */}
+      {universe && (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          background: 'rgba(124,58,237,0.15)',
+          border: '1px solid rgba(124,58,237,0.4)',
+          borderRadius: 6,
+          padding: '4px 10px',
+          marginBottom: 20,
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>∪ Universe Remodel</span>
+        </div>
+      )}
+
+      {/* AGGREGATE section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Aggregate</SectionLabel>
+        <InlineField
+          label="Aggregate name"
+          value={aggregateLabel}
+          placeholder="Aggregate name"
+          onChange={setAggregateLabel}
+          onBlur={saveAggregateNote}
+        />
+        <InlineField
+          label="Description"
+          value={aggregateContent}
+          placeholder="Description..."
+          onChange={setAggregateContent}
+          onBlur={saveAggregateNote}
+          multiline
+        />
+      </div>
+
+      {/* PARAMETERS section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Parameters</SectionLabel>
+        <InlineField
+          label="Parameter name"
+          value={parameterLabel}
+          placeholder="Parameter name"
+          onChange={setParameterLabel}
+          onBlur={saveParameterNote}
+        />
+        <InlineField
+          label="Details"
+          value={parameterContent}
+          placeholder="Parameter details..."
+          onChange={setParameterContent}
+          onBlur={saveParameterNote}
+          multiline
+        />
+      </div>
+
+      {/* QUERY NAME section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Query Name</SectionLabel>
+        <InlineField
+          label="Query name"
+          value={queryLabel}
+          placeholder="e.g. GetOrderList"
+          onChange={setQueryLabel}
+          onBlur={saveQueryNote}
+        />
+        <InlineField
+          label="Description"
+          value={queryContent}
+          placeholder="Query description..."
+          onChange={setQueryContent}
+          onBlur={saveQueryNote}
+          multiline
+        />
+      </div>
+
+      {/* SOURCE EVENTS section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Source Events</SectionLabel>
+        <InlineField
+          label="Event sources"
+          value={sourceEventLabel}
+          placeholder="Event sources"
+          onChange={setSourceEventLabel}
+          onBlur={saveSourceEventNote}
+        />
+        <InlineField
+          label="Details"
+          value={sourceEventContent}
+          placeholder="Which events compose this read model..."
+          onChange={setSourceEventContent}
+          onBlur={saveSourceEventNote}
+          multiline
+        />
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 20 }} />
+
+      {/* LINKED BUNDLES section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Linked Bundles</SectionLabel>
+
+        {/* Existing linked bundles as chips */}
+        {remodel.linkedBundleIds.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+            {remodel.linkedBundleIds.map((linkedId) => {
+              const linkedBundle = allBundles.find((b) => b.id === linkedId);
+              const isDeleted = !linkedBundle;
+              const displayLabel = linkedBundle
+                ? (linkedBundle.infoNote.label || linkedBundle.commandNote.label || '(Unnamed Bundle)')
+                : '(Deleted Bundle)';
+              const subLabel = linkedBundle
+                ? (linkedBundle.commandNote.label ? ` — ${linkedBundle.commandNote.label}` : '')
+                : '';
+
+              return (
+                <div
+                  key={linkedId}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: isDeleted ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${isDeleted ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.1)'}`,
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                  }}
+                >
+                  <span style={{
+                    fontSize: 12,
+                    color: isDeleted ? TEXT_MUTED : TEXT_MAIN,
+                    fontStyle: isDeleted ? 'italic' : 'normal',
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {displayLabel}
+                    {subLabel && <span style={{ color: TEXT_MUTED }}>{subLabel}</span>}
+                  </span>
+                  <button
+                    onClick={() => removeBundleLink(linkedId)}
+                    title={isDeleted ? '清理此連結' : '移除連結'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: TEXT_MUTED,
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      padding: '0 0 0 8px',
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add Bundle dropdown */}
+        <div ref={dropdownRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowBundleDropdown((v) => !v)}
+            style={{
+              background: 'none',
+              border: '1px dashed rgba(255,255,255,0.2)',
+              borderRadius: 4,
+              color: TEXT_MUTED,
+              cursor: 'pointer',
+              fontSize: 12,
+              padding: '5px 10px',
+              width: '100%',
+              textAlign: 'left',
+            }}
+          >
+            + Add Bundle
+          </button>
+
+          {showBundleDropdown && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              marginTop: 4,
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              zIndex: 100,
+              overflow: 'hidden',
+            }}>
+              {/* Search input */}
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={bundleSearchQuery}
+                  onChange={(e) => setBundleSearchQuery(e.target.value)}
+                  placeholder="Search bundles..."
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    color: TEXT_MAIN,
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* Bundle options */}
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {filteredAvailableBundles.length === 0 ? (
+                  <div style={{ padding: '8px 12px', fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+                    {availableBundles.length === 0 ? 'No bundles available' : 'No matching bundles'}
+                  </div>
+                ) : (
+                  filteredAvailableBundles.map((b) => {
+                    const displayLabel = b.infoNote.label || b.commandNote.label || '(Unnamed Bundle)';
+                    const subLabel = b.commandNote.label && b.infoNote.label ? ` — ${b.commandNote.label}` : '';
+                    return (
+                      <button
+                        key={b.id}
+                        onClick={() => addBundleLink(b.id)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 12px',
+                          background: 'none',
+                          border: 'none',
+                          color: TEXT_MAIN,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        {displayLabel}
+                        {subLabel && <span style={{ color: TEXT_MUTED }}>{subLabel}</span>}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* UNIVERSE STATUS section */}
+      {remodel.linkedBundleIds.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          {universe ? (
+            <div style={{
+              background: 'rgba(124,58,237,0.1)',
+              border: '1px solid rgba(124,58,237,0.3)',
+              borderRadius: 6,
+              padding: '8px 10px',
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', marginBottom: 4 }}>
+                ∪ Universe Remodel
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8' }}>
+                Crosses: {aggregateNames.join(', ')}
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: '#94a3b8' }}>
+              {aggregateNames.length > 0
+                ? `Single Aggregate: ${aggregateNames[0]}`
+                : 'Aggregate not set on linked bundle'}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 20 }} />
+
+      {/* PATHS section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Paths</SectionLabel>
+        {flowPaths.length === 0 ? (
+          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+            尚未建立任何 Path
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {flowPaths.map((fp) => {
+              const checked = remodelPaths.includes(fp.id);
+              return (
+                <label
+                  key={fp.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    cursor: 'pointer',
+                    color: checked ? TEXT_MAIN : TEXT_DIM,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => togglePath(fp.id)}
+                    style={{ accentColor: fp.color, width: 14, height: 14 }}
+                  />
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: '50%',
+                      backgroundColor: fp.color,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontSize: 13 }}>{fp.name}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* META section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Meta</SectionLabel>
+        <InlineField
+          label="Phase"
+          value={phase}
+          placeholder="階段..."
+          onChange={setPhase}
+          onBlur={saveMeta}
+        />
+      </div>
+
+      {/* NOTES section */}
+      <div>
+        <SectionLabel>Notes</SectionLabel>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={saveNotes}
+          placeholder="新增備注..."
+          rows={4}
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderLeft: '2px solid rgba(255,255,255,0.15)',
+            borderRadius: 0,
+            color: TEXT_MAIN,
+            fontSize: 12,
+            padding: '4px 10px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            resize: 'none',
+            boxSizing: 'border-box',
+            lineHeight: 1.6,
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
 export const DetailPanel: React.FC = () => {
@@ -807,15 +1310,11 @@ export const DetailPanel: React.FC = () => {
         {bundle && <BundlePanel bundle={bundle} flowPaths={activeBoard.flowPaths} />}
         {note && <NotePanel note={note} flowPaths={activeBoard.flowPaths} />}
         {remodel && (
-          <div style={{ padding: '0 16px', color: '#94a3b8', fontSize: 13 }}>
-            {/* Remodel detail editing will be implemented in FE-010 */}
-            <div style={{ marginBottom: 8, fontWeight: 600, color: '#a78bfa', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Remodel
-            </div>
-            <div style={{ opacity: 0.6 }}>
-              Detail panel editing for Remodel coming soon (FE-010).
-            </div>
-          </div>
+          <RemodelPanel
+            remodel={remodel}
+            flowPaths={activeBoard.flowPaths}
+            allBundles={activeBoard.bundles}
+          />
         )}
       </div>
     </div>
