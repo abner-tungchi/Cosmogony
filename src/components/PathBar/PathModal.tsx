@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import type { FlowPath } from '../../types/elements';
+import type { FlowPath, StickyNote } from '../../types/elements';
 
 const PRESET_COLORS = [
   '#FF8C42',
@@ -17,6 +17,7 @@ type ModalMode = 'create' | 'edit';
 interface PathModalProps {
   mode: ModalMode;
   initialData?: FlowPath;
+  actorNotes: StickyNote[];
   onConfirm: (data: Omit<FlowPath, 'id'>) => void;
   onCancel: () => void;
 }
@@ -24,12 +25,14 @@ interface PathModalProps {
 export const PathModal: React.FC<PathModalProps> = ({
   mode,
   initialData,
+  actorNotes,
   onConfirm,
   onCancel,
 }) => {
   const [name, setName] = useState(initialData?.name ?? '');
   const [color, setColor] = useState(initialData?.color ?? PRESET_COLORS[0]);
   const [description, setDescription] = useState(initialData?.description ?? '');
+  const [actorId, setActorId] = useState<string | undefined>(initialData?.actorId);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -39,7 +42,12 @@ export const PathModal: React.FC<PathModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onConfirm({ name: name.trim(), color, description: description.trim() || undefined });
+    onConfirm({
+      name: name.trim(),
+      color,
+      description: description.trim() || undefined,
+      actorId: actorId || undefined,
+    });
   };
 
   const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -111,8 +119,12 @@ export const PathModal: React.FC<PathModalProps> = ({
                 boxSizing: 'border-box',
                 transition: 'border-color 150ms ease',
               }}
-              onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; }}
-              onBlur={(e) => { e.target.style.borderColor = '#e2e8f0'; }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#3b82f6';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e2e8f0';
+              }}
             />
           </div>
 
@@ -154,6 +166,65 @@ export const PathModal: React.FC<PathModalProps> = ({
             </div>
           </div>
 
+          {/* Actor */}
+          <div style={{ marginBottom: 16 }}>
+            <label
+              style={{
+                display: 'block',
+                fontSize: 12,
+                fontWeight: 600,
+                color: '#475569',
+                marginBottom: 6,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              Actor (optional)
+            </label>
+            <select
+              value={actorId ?? ''}
+              onChange={(e) => setActorId(e.target.value || undefined)}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                border: '1px solid #e2e8f0',
+                borderRadius: 8,
+                fontSize: 14,
+                color: actorId ? '#1e293b' : '#94a3b8',
+                background: '#ffffff',
+                outline: 'none',
+                boxSizing: 'border-box',
+                cursor: 'pointer',
+                transition: 'border-color 150ms ease',
+                appearance: 'auto',
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#3b82f6';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e2e8f0';
+              }}
+            >
+              <option value="">(No Actor)</option>
+              {actorNotes.map((actor) => (
+                <option key={actor.id} value={actor.id}>
+                  {actor.label || '(Unnamed Actor)'}
+                </option>
+              ))}
+            </select>
+            {actorNotes.length === 0 && (
+              <p
+                style={{
+                  margin: '4px 0 0',
+                  fontSize: 11,
+                  color: '#94a3b8',
+                }}
+              >
+                No Actor notes on this board yet.
+              </p>
+            )}
+          </div>
+
           {/* Description */}
           <div style={{ marginBottom: 24 }}>
             <label
@@ -187,8 +258,12 @@ export const PathModal: React.FC<PathModalProps> = ({
                 boxSizing: 'border-box',
                 transition: 'border-color 150ms ease',
               }}
-              onFocus={(e) => { e.target.style.borderColor = '#3b82f6'; }}
-              onBlur={(e) => { e.target.style.borderColor = '#e2e8f0'; }}
+              onFocus={(e) => {
+                e.target.style.borderColor = '#3b82f6';
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = '#e2e8f0';
+              }}
             />
           </div>
 

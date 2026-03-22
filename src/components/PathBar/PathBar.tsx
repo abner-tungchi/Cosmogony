@@ -12,12 +12,19 @@ type ContextMenuState =
 export const PathBar: React.FC = () => {
   const activeBoard = useBoardStore(selectActiveBoard);
   const { addFlowPath, updateFlowPath, deleteFlowPath } = useBoardStore();
-  const { activePath, setActivePath } = useUIStore();
+  const { activePath, setActivePath, activeActorFilter, setActiveActorFilter } = useUIStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPath, setEditingPath] = useState<FlowPath | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ open: false });
+  const [actorDropdownOpen, setActorDropdownOpen] = useState(false);
   const contextMenuRef = useRef<HTMLDivElement>(null);
+  const actorDropdownRef = useRef<HTMLDivElement>(null);
+
+  const actorNotes = useMemo(
+    () => activeBoard.notes.filter((n) => n.type === 'Actor'),
+    [activeBoard.notes],
+  );
 
   // Close context menu on outside click
   useEffect(() => {
@@ -31,12 +38,42 @@ export const PathBar: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [contextMenu.open]);
 
+  // Close actor dropdown on outside click
+  useEffect(() => {
+    if (!actorDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (actorDropdownRef.current && !actorDropdownRef.current.contains(e.target as Node)) {
+        setActorDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [actorDropdownOpen]);
+
   // If activePath no longer exists in flowPaths, reset to null
   useEffect(() => {
     if (activePath && !activeBoard.flowPaths.some((fp) => fp.id === activePath)) {
       setActivePath(null);
     }
   }, [activeBoard.flowPaths, activePath, setActivePath]);
+
+  // If selected Actor was deleted, reset actor filter to null
+  useEffect(() => {
+    if (
+      activeActorFilter &&
+      !activeBoard.notes.some((n) => n.id === activeActorFilter && n.type === 'Actor')
+    ) {
+      setActiveActorFilter(null);
+    }
+  }, [activeBoard.notes, activeActorFilter, setActiveActorFilter]);
+
+  // Filtered paths based on active actor filter
+  const filteredPaths = useMemo<FlowPath[]>(() => {
+    if (!activeActorFilter) return activeBoard.flowPaths;
+    return activeBoard.flowPaths.filter(
+      (fp) => fp.actorId === activeActorFilter || !fp.actorId,
+    );
+  }, [activeBoard.flowPaths, activeActorFilter]);
 
   const pathCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -48,22 +85,31 @@ export const PathBar: React.FC = () => {
     return counts;
   }, [activeBoard.flowPaths, activeBoard.notes, activeBoard.bundles]);
 
-  const handleCreatePath = useCallback((data: Omit<FlowPath, 'id'>) => {
-    addFlowPath({ id: uuidv4(), ...data });
-    setShowCreateModal(false);
-  }, [addFlowPath]);
+  const handleCreatePath = useCallback(
+    (data: Omit<FlowPath, 'id'>) => {
+      addFlowPath({ id: uuidv4(), ...data });
+      setShowCreateModal(false);
+    },
+    [addFlowPath],
+  );
 
-  const handleEditPath = useCallback((data: Omit<FlowPath, 'id'>) => {
-    if (!editingPath) return;
-    updateFlowPath(editingPath.id, data);
-    setEditingPath(null);
-  }, [editingPath, updateFlowPath]);
+  const handleEditPath = useCallback(
+    (data: Omit<FlowPath, 'id'>) => {
+      if (!editingPath) return;
+      updateFlowPath(editingPath.id, data);
+      setEditingPath(null);
+    },
+    [editingPath, updateFlowPath],
+  );
 
-  const handleDeletePath = useCallback((id: string) => {
-    deleteFlowPath(id);
-    if (activePath === id) setActivePath(null);
-    setContextMenu({ open: false });
-  }, [deleteFlowPath, activePath, setActivePath]);
+  const handleDeletePath = useCallback(
+    (id: string) => {
+      deleteFlowPath(id);
+      if (activePath === id) setActivePath(null);
+      setContextMenu({ open: false });
+    },
+    [deleteFlowPath, activePath, setActivePath],
+  );
 
   const handleTabRightClick = (e: React.MouseEvent, pathId: string) => {
     e.preventDefault();
@@ -71,7 +117,12 @@ export const PathBar: React.FC = () => {
     setContextMenu({ open: true, pathId, x: e.clientX, y: e.clientY, confirmingDelete: false });
   };
 
-  const handlePathTabHover = (e: React.MouseEvent<HTMLButtonElement>, path: FlowPath, isActive: boolean, entering: boolean) => {
+  const handlePathTabHover = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    path: FlowPath,
+    isActive: boolean,
+    entering: boolean,
+  ) => {
     if (isActive) return;
     const btn = e.currentTarget;
     if (entering) {
@@ -84,6 +135,12 @@ export const PathBar: React.FC = () => {
       btn.style.color = '#64748b';
     }
   };
+
+  const selectedActorLabel = useMemo(() => {
+    if (!activeActorFilter) return 'All Actors';
+    const actor = actorNotes.find((n) => n.id === activeActorFilter);
+    return actor ? actor.label || '(Unnamed Actor)' : 'All Actors';
+  }, [activeActorFilter, actorNotes]);
 
   return (
     <>
@@ -110,12 +167,142 @@ export const PathBar: React.FC = () => {
             color: '#94a3b8',
             textTransform: 'uppercase',
             letterSpacing: '0.08em',
-            marginRight: 8,
+            marginRight: 4,
             flexShrink: 0,
           }}
         >
           PATH
         </span>
+
+        {/* Actor filter dropdown */}
+        <div ref={actorDropdownRef} style={{ position: 'relative', flexShrink: 0 }}>
+          <button
+            onClick={() => setActorDropdownOpen((prev) => !prev)}
+            style={{
+              height: 28,
+              padding: '0 10px',
+              borderRadius: 14,
+              fontSize: 11,
+              fontWeight: activeActorFilter ? 600 : 500,
+              background: activeActorFilter ? 'rgba(59,130,246,0.08)' : 'transparent',
+              color: activeActorFilter ? '#3b82f6' : '#64748b',
+              border: `1px solid ${activeActorFilter ? 'rgba(59,130,246,0.3)' : 'rgba(0,0,0,0.08)'}`,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              transition: 'all 150ms ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <span style={{ fontSize: 12 }}>👤</span>
+            {selectedActorLabel}
+            <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 2 }}>▾</span>
+          </button>
+
+          {actorDropdownOpen && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                background: '#ffffff',
+                border: '1px solid rgba(0,0,0,0.1)',
+                borderRadius: 8,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                zIndex: 9500,
+                minWidth: 160,
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}
+            >
+              {/* "All Actors" option */}
+              <button
+                onClick={() => {
+                  setActiveActorFilter(null);
+                  setActorDropdownOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: 'none',
+                  background: activeActorFilter === null ? 'rgba(59,130,246,0.06)' : 'transparent',
+                  textAlign: 'left',
+                  fontSize: 12,
+                  color: activeActorFilter === null ? '#3b82f6' : '#1e293b',
+                  fontWeight: activeActorFilter === null ? 600 : 400,
+                  cursor: 'pointer',
+                  transition: 'background 100ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (activeActorFilter !== null) e.currentTarget.style.background = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  if (activeActorFilter !== null) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span style={{ fontSize: 12 }}>👤</span>
+                All Actors
+              </button>
+
+              {actorNotes.length > 0 && (
+                <div style={{ height: 1, background: 'rgba(0,0,0,0.06)', margin: '0 8px' }} />
+              )}
+
+              {actorNotes.map((actor) => (
+                <button
+                  key={actor.id}
+                  onClick={() => {
+                    setActiveActorFilter(actor.id);
+                    setActorDropdownOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    width: '100%',
+                    padding: '8px 12px',
+                    border: 'none',
+                    background:
+                      activeActorFilter === actor.id ? 'rgba(59,130,246,0.06)' : 'transparent',
+                    textAlign: 'left',
+                    fontSize: 12,
+                    color: activeActorFilter === actor.id ? '#3b82f6' : '#1e293b',
+                    fontWeight: activeActorFilter === actor.id ? 600 : 400,
+                    cursor: 'pointer',
+                    transition: 'background 100ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (activeActorFilter !== actor.id)
+                      e.currentTarget.style.background = '#f8fafc';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (activeActorFilter !== actor.id)
+                      e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span style={{ fontSize: 12 }}>👤</span>
+                  {actor.label || '(Unnamed Actor)'}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Separator */}
+        <div
+          style={{
+            width: 1,
+            height: 18,
+            background: 'rgba(0,0,0,0.08)',
+            flexShrink: 0,
+            marginLeft: 2,
+            marginRight: 2,
+          }}
+        />
 
         {/* "All" tab */}
         <button
@@ -138,8 +325,8 @@ export const PathBar: React.FC = () => {
           All
         </button>
 
-        {/* Path tabs */}
-        {activeBoard.flowPaths.map((path) => {
+        {/* Path tabs — filtered by activeActorFilter */}
+        {filteredPaths.map((path) => {
           const isActive = activePath === path.id;
           const count = pathCounts[path.id] ?? 0;
           return (
@@ -305,8 +492,12 @@ export const PathBar: React.FC = () => {
                   cursor: 'pointer',
                   transition: 'background 100ms ease',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#f8fafc'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
               >
                 Edit
               </button>
@@ -314,7 +505,7 @@ export const PathBar: React.FC = () => {
               <button
                 onClick={() =>
                   setContextMenu((prev) =>
-                    prev.open ? { ...prev, confirmingDelete: true } : prev
+                    prev.open ? { ...prev, confirmingDelete: true } : prev,
                   )
                 }
                 style={{
@@ -329,8 +520,12 @@ export const PathBar: React.FC = () => {
                   cursor: 'pointer',
                   transition: 'background 100ms ease',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#fef2f2';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                }}
               >
                 Delete
               </button>
@@ -343,6 +538,7 @@ export const PathBar: React.FC = () => {
       {showCreateModal && (
         <PathModal
           mode="create"
+          actorNotes={actorNotes}
           onConfirm={handleCreatePath}
           onCancel={() => setShowCreateModal(false)}
         />
@@ -353,6 +549,7 @@ export const PathBar: React.FC = () => {
         <PathModal
           mode="edit"
           initialData={editingPath}
+          actorNotes={actorNotes}
           onConfirm={handleEditPath}
           onCancel={() => setEditingPath(null)}
         />
