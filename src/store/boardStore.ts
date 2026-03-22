@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
 import type { Board, Project, BoardStore } from '../types/board';
-import type { StickyNote, Bundle, Link, FlowPath } from '../types/elements';
+import type { StickyNote, Bundle, Link, FlowPath, Remodel } from '../types/elements';
 
 function createBoard(name: string): Board {
   return {
@@ -11,6 +11,7 @@ function createBoard(name: string): Board {
     name,
     notes: [],
     bundles: [],
+    remodels: [],
     links: [],
     flowPaths: [],
     createdAt: new Date().toISOString(),
@@ -204,6 +205,7 @@ export const useBoardStore = create<BoardStore>()(
           if (board) {
             board.notes = [];
             board.bundles = [];
+            board.remodels = [];
             board.links = [];
             board.updatedAt = new Date().toISOString();
             state.project.updatedAt = board.updatedAt;
@@ -266,6 +268,39 @@ export const useBoardStore = create<BoardStore>()(
           state.project.updatedAt = now;
         }),
 
+      addRemodel: (remodel) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (board) {
+            board.remodels.push(remodel);
+            board.updatedAt = new Date().toISOString();
+            state.project.updatedAt = board.updatedAt;
+          }
+        }),
+
+      updateRemodel: (id, updates) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const remodel = board.remodels.find((r: Remodel) => r.id === id);
+          if (remodel) {
+            Object.assign(remodel, updates);
+            remodel.updatedAt = new Date().toISOString();
+            board.updatedAt = remodel.updatedAt;
+            state.project.updatedAt = remodel.updatedAt;
+          }
+        }),
+
+      deleteRemodel: (id) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          board.remodels = board.remodels.filter((r: Remodel) => r.id !== id);
+          board.links = board.links.filter((l: Link) => l.fromId !== id && l.toId !== id);
+          board.updatedAt = new Date().toISOString();
+          state.project.updatedAt = board.updatedAt;
+        }),
+
       addFlowPath: (flowPath) =>
         set((state) => {
           const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
@@ -299,7 +334,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 5,
+      version: 6,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -330,6 +365,7 @@ export const useBoardStore = create<BoardStore>()(
             bundles: (oldBoard.bundles ?? [])
               .filter((b) => !b.clusterId)
               .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
+            remodels: [],
             links: (oldBoard.links ?? []) as Link[],
             flowPaths: [],
             createdAt: oldBoard.createdAt ?? now,
@@ -345,6 +381,7 @@ export const useBoardStore = create<BoardStore>()(
             bundles: (oldBoard.bundles ?? [])
               .filter((b) => b.clusterId === cluster.id)
               .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
+            remodels: [],
             links: [],
             flowPaths: [],
             createdAt: now,
@@ -390,6 +427,18 @@ export const useBoardStore = create<BoardStore>()(
                 const n = note as StickyNote & { paths?: string[] };
                 if (!n.paths) n.paths = [];
               }
+            }
+          }
+          // fall through to v5 → v6
+        }
+
+        if (version <= 5) {
+          // v5 → v6: add remodels to boards
+          const s = persistedState as { project?: Project };
+          if (s.project) {
+            for (const board of s.project.boards) {
+              const b = board as Board & { remodels?: Remodel[] };
+              if (!b.remodels) b.remodels = [];
             }
           }
           return persistedState as BoardStore;

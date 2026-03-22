@@ -1,10 +1,11 @@
-import type { StickyNote, Bundle, Link, FlowPath } from './elements';
+import type { StickyNote, Bundle, Link, FlowPath, Remodel } from './elements';
 
 export interface Board {
   id: string;
   name: string;
   notes: StickyNote[];
   bundles: Bundle[];
+  remodels: Remodel[];
   links: Link[];
   flowPaths: FlowPath[];
   createdAt: string;
@@ -30,7 +31,7 @@ export interface UIState {
   isDraggingCanvas: boolean;
   isLinkingMode: boolean;
   linkFromId: string | null;
-  linkFromType: 'note' | 'bundle' | null;
+  linkFromType: 'note' | 'bundle' | 'remodel' | null;
 }
 
 export interface BoardStore {
@@ -62,6 +63,11 @@ export interface BoardStore {
   expandNoteToBundle: (noteId: string) => void;
   collapseAllBundles: () => void;
   expandAllBundles: () => void;
+
+  // Remodel management (active board)
+  addRemodel: (remodel: Remodel) => void;
+  updateRemodel: (id: string, updates: Partial<Remodel>) => void;
+  deleteRemodel: (id: string) => void;
 
   // FlowPath management (active board)
   addFlowPath: (flowPath: FlowPath) => void;

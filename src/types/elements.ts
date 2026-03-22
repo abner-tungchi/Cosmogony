@@ -13,6 +13,7 @@ export interface FlowPath {
   name: string;
   color: string;
   description?: string;
+  actorId?: string;
 }
 
 export interface StickyNote {
@@ -58,8 +59,31 @@ export interface Link {
   id: string;
   fromId: string;
   toId: string;
-  fromType: 'note' | 'bundle';
-  toType: 'note' | 'bundle';
+  fromType: 'note' | 'bundle' | 'remodel';
+  toType: 'note' | 'bundle' | 'remodel';
   label?: string;
   createdAt: string;
+}
+
+export interface Remodel {
+  id: string;
+  position: { x: number; y: number };
+
+  // Four sub-notes (reusing BundleSubNote, different semantics)
+  aggregateNote: BundleSubNote;     // top: Aggregate (read perspective)
+  parameterNote: BundleSubNote;     // bottom-left: Query parameters
+  queryNote: BundleSubNote;         // bottom-center: Query name
+  sourceEventNote: BundleSubNote;   // bottom-right: Event Source description
+
+  // Bundle linkage
+  linkedBundleIds: string[];
+
+  // Metadata (consistent with Bundle)
+  zIndex: number;
+  collapsed?: boolean;
+  paths?: string[];
+  phase?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
