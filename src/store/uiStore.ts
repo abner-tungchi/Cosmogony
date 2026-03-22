@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { UIState } from '../types/board';
-import type { StickyNote, Bundle } from '../types/elements';
+import type { StickyNote, Bundle, Remodel } from '../types/elements';
 
 const NOTE_DEFAULT_WIDTH = 160;
 const NOTE_DEFAULT_HEIGHT = 80;
@@ -13,6 +13,7 @@ const ZOOM_MAX = 3;
 interface FitAllParams {
   notes: StickyNote[];
   bundles: Bundle[];
+  remodels: Remodel[];
   viewportWidth: number;
   viewportHeight: number;
 }
@@ -20,12 +21,14 @@ interface FitAllParams {
 interface UIStore extends UIState {
   currentView: 'home' | 'board';
   activePath: string | null;
+  activeActorFilter: string | null;  // null = "All Actors"
   // Detail Panel selection — intentionally not persisted
   selectedElementId: string | null;
-  selectedElementType: 'bundle' | 'note' | null;
+  selectedElementType: 'bundle' | 'note' | 'remodel' | null;
 
   setCurrentView: (view: 'home' | 'board') => void;
   setActivePath: (id: string | null) => void;
+  setActiveActorFilter: (actorId: string | null) => void;
   setZoom: (zoom: number) => void;
   setPan: (panX: number, panY: number) => void;
   setSelectedNoteIds: (ids: string[]) => void;
@@ -35,13 +38,14 @@ interface UIStore extends UIState {
   resetView: () => void;
   fitAll: (params: FitAllParams) => void;
   setLinkingMode: (enabled: boolean) => void;
-  setLinkFrom: (id: string | null, type: 'note' | 'bundle' | null) => void;
-  setSelectedElement: (id: string | null, type: 'bundle' | 'note' | null) => void;
+  setLinkFrom: (id: string | null, type: 'note' | 'bundle' | 'remodel' | null) => void;
+  setSelectedElement: (id: string | null, type: 'bundle' | 'note' | 'remodel' | null) => void;
 }
 
 export const useUIStore = create<UIStore>((set, get) => ({
   currentView: 'home',
   activePath: null,
+  activeActorFilter: null,
   selectedElementId: null,
   selectedElementType: null,
   zoom: 1,
@@ -55,6 +59,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   linkFromType: null,
 
   setActivePath: (id) => set({ activePath: id }),
+  setActiveActorFilter: (actorId) => set({ activeActorFilter: actorId }),
   setSelectedElement: (id, type) => set({ selectedElementId: id, selectedElementType: type }),
   setCurrentView: (view) => set(view === 'board'
     ? { currentView: view, activeToolType: null, isLinkingMode: false }
@@ -74,8 +79,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setActiveToolType: (type) => set({ activeToolType: type }),
   setIsDraggingCanvas: (dragging) => set({ isDraggingCanvas: dragging }),
   resetView: () => set({ zoom: 1, panX: 0, panY: 0 }),
-  fitAll: ({ notes, bundles, viewportWidth, viewportHeight }) => {
-    const isEmpty = notes.length === 0 && bundles.length === 0;
+  fitAll: ({ notes, bundles, remodels, viewportWidth, viewportHeight }) => {
+    const isEmpty = notes.length === 0 && bundles.length === 0 && remodels.length === 0;
     if (isEmpty) {
       set({ zoom: 1, panX: 0, panY: 0 });
       return;
@@ -100,6 +105,14 @@ export const useUIStore = create<UIStore>((set, get) => ({
       minY = Math.min(minY, bundle.position.y);
       maxX = Math.max(maxX, bundle.position.x + BUNDLE_WIDTH);
       maxY = Math.max(maxY, bundle.position.y + BUNDLE_HEIGHT);
+    }
+
+    // Remodels have the same dimensions as Bundles
+    for (const remodel of remodels) {
+      minX = Math.min(minX, remodel.position.x);
+      minY = Math.min(minY, remodel.position.y);
+      maxX = Math.max(maxX, remodel.position.x + BUNDLE_WIDTH);
+      maxY = Math.max(maxY, remodel.position.y + BUNDLE_HEIGHT);
     }
 
     const bbWidth = maxX - minX + FIT_ALL_PADDING * 2;

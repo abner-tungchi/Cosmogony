@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useCallback } from 'react';
-import type { StickyNote, Bundle } from '../../types/elements';
+import type { StickyNote, Bundle, Remodel } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 
 // ---- constants ----
@@ -13,6 +13,7 @@ const BUNDLE_COLLAPSED_W = 200;
 const BUNDLE_COLLAPSED_H = 64;
 
 const BUNDLE_COLOR = '#FFD600'; // yellow-ish, represents the aggregate (top sub-card)
+const REMODEL_COLOR = '#a78bfa'; // purple — distinct from Bundle
 const VIEWPORT_STROKE = '#3b82f6';
 const VIEWPORT_STROKE_WIDTH = 1.5;
 
@@ -27,6 +28,7 @@ interface ElementBounds {
 interface MinimapProps {
   notes: StickyNote[];
   bundles: Bundle[];
+  remodels: Remodel[];
   zoom: number;
   panX: number;
   panY: number;
@@ -40,7 +42,8 @@ interface MinimapProps {
 // Compute the bounding box of all canvas-coordinate elements
 function computeWorldBounds(
   notes: StickyNote[],
-  bundles: Bundle[]
+  bundles: Bundle[],
+  remodels: Remodel[]
 ): { minX: number; minY: number; maxX: number; maxY: number } | null {
   let minX = Infinity;
   let minY = Infinity;
@@ -63,6 +66,14 @@ function computeWorldBounds(
     maxY = Math.max(maxY, bundle.position.y + bh);
   }
 
+  // Remodels are always expanded (same size as expanded Bundle)
+  for (const remodel of remodels) {
+    minX = Math.min(minX, remodel.position.x);
+    minY = Math.min(minY, remodel.position.y);
+    maxX = Math.max(maxX, remodel.position.x + BUNDLE_EXPANDED_W);
+    maxY = Math.max(maxY, remodel.position.y + BUNDLE_EXPANDED_H);
+  }
+
   if (minX === Infinity) return null;
   return { minX, minY, maxX, maxY };
 }
@@ -70,6 +81,7 @@ function computeWorldBounds(
 export const Minimap: React.FC<MinimapProps> = ({
   notes,
   bundles,
+  remodels,
   zoom,
   panX,
   panY,
@@ -96,7 +108,7 @@ export const Minimap: React.FC<MinimapProps> = ({
     ctx.clearRect(0, 0, MINIMAP_W, MINIMAP_H);
 
     // World-space bounds (union of all elements)
-    const worldBounds = computeWorldBounds(notes, bundles);
+    const worldBounds = computeWorldBounds(notes, bundles, remodels);
 
     // Drawing area within minimap (with padding)
     const drawAreaX = MINIMAP_PADDING;
@@ -173,6 +185,21 @@ export const Minimap: React.FC<MinimapProps> = ({
       ctx.fillRect(bounds.x, bounds.y, Math.max(bounds.w, 3), Math.max(bounds.h, 2));
     }
 
+    // Remodels — draw as purple rectangles (always expanded size)
+    for (const remodel of remodels) {
+      const isDimmed = activePath !== null && !(remodel.paths ?? []).includes(activePath);
+      const bounds: ElementBounds = {
+        x: toMiniX(remodel.position.x),
+        y: toMiniY(remodel.position.y),
+        w: BUNDLE_EXPANDED_W * scale,
+        h: BUNDLE_EXPANDED_H * scale,
+      };
+
+      ctx.globalAlpha = isDimmed ? 0.15 : 0.85;
+      ctx.fillStyle = REMODEL_COLOR;
+      ctx.fillRect(bounds.x, bounds.y, Math.max(bounds.w, 3), Math.max(bounds.h, 2));
+    }
+
     // Notes — draw as small colored dots/rects
     for (const note of notes) {
       const isDimmed = activePath !== null && !(note.paths ?? []).includes(activePath);
@@ -205,7 +232,7 @@ export const Minimap: React.FC<MinimapProps> = ({
     // Subtle viewport fill
     ctx.fillStyle = 'rgba(59, 130, 246, 0.06)';
     ctx.fillRect(vpMiniX, vpMiniY, vpMiniW, vpMiniH);
-  }, [notes, bundles, zoom, panX, panY, viewportWidth, viewportHeight, activePath]);
+  }, [notes, bundles, remodels, zoom, panX, panY, viewportWidth, viewportHeight, activePath]);
 
   useEffect(() => {
     draw();

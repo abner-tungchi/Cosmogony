@@ -1,5 +1,6 @@
 import type { Board } from '../types/board';
 import type { StickyNote, Bundle } from '../types/elements';
+import { isUniverseRemodel } from './remodelUtils';
 
 function getTypeEmoji(type: string): string {
   const emojis: Record<string, string> = {
@@ -36,11 +37,13 @@ function findNearest(
   return closest[0] || filtered[0];
 }
 
-function getLabelForId(id: string, notes: StickyNote[], bundles: Bundle[]): string {
-  const note = notes.find((n) => n.id === id);
+function getLabelForId(id: string, board: Board): string {
+  const note = board.notes.find((n) => n.id === id);
   if (note) return `${note.type}: ${note.label}`;
-  const bundle = bundles.find((b) => b.id === id);
+  const bundle = board.bundles.find((b) => b.id === id);
   if (bundle) return `Bundle: ${bundle.infoNote.label}`;
+  const remodel = board.remodels?.find((r) => r.id === id);
+  if (remodel) return `Remodel: ${remodel.queryNote.label || remodel.aggregateNote.label}`;
   return id;
 }
 
@@ -65,13 +68,39 @@ export function exportToMarkdown(board: Board): string {
     }
   }
 
+  // Remodels section
+  if (board.remodels && board.remodels.length > 0) {
+    lines.push('## Remodels');
+    lines.push('');
+    for (const remodel of board.remodels) {
+      const queryLabel = remodel.queryNote.label || '(unnamed)';
+      lines.push(`### ${queryLabel}`);
+      lines.push(`- **Aggregate**: ${remodel.aggregateNote.label || '—'}${remodel.aggregateNote.content ? ' — ' + remodel.aggregateNote.content : ''}`);
+      lines.push(`- **Parameters**: ${remodel.parameterNote.label || '—'}${remodel.parameterNote.content ? ' — ' + remodel.parameterNote.content : ''}`);
+      lines.push(`- **Query**: ${remodel.queryNote.label || '—'}${remodel.queryNote.content ? ' — ' + remodel.queryNote.content : ''}`);
+      lines.push(`- **Source Events**: ${remodel.sourceEventNote.label || '—'}${remodel.sourceEventNote.content ? ' — ' + remodel.sourceEventNote.content : ''}`);
+      if (remodel.linkedBundleIds.length > 0) {
+        const linkedBundleLabels = remodel.linkedBundleIds
+          .map((id) => {
+            const bundle = board.bundles.find((b) => b.id === id);
+            return bundle ? (bundle.commandNote.label || bundle.infoNote.label || id) : id;
+          })
+          .join(', ');
+        lines.push(`- **Linked Bundles**: ${linkedBundleLabels}`);
+      }
+      const universe = isUniverseRemodel(remodel, board.bundles);
+      lines.push(`- **Universe**: ${universe ? 'Yes' : 'No'}`);
+      lines.push('');
+    }
+  }
+
   // Connections section
   if (board.links && board.links.length > 0) {
     lines.push('## Connections');
     lines.push('');
     for (const link of board.links) {
-      const fromLabel = getLabelForId(link.fromId, board.notes, board.bundles);
-      const toLabel = getLabelForId(link.toId, board.notes, board.bundles);
+      const fromLabel = getLabelForId(link.fromId, board);
+      const toLabel = getLabelForId(link.toId, board);
       const labelPart = link.label ? ` _(${link.label})_` : '';
       lines.push(`- [${fromLabel}] → [${toLabel}]${labelPart}`);
     }

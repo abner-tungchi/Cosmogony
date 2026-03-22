@@ -88,6 +88,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     fitAll({
       notes: activeBoard.notes,
       bundles: activeBoard.bundles,
+      remodels: activeBoard.remodels,
       viewportWidth: rect?.width ?? window.innerWidth,
       viewportHeight: rect?.height ?? window.innerHeight,
     });
@@ -375,8 +376,33 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
         {!collapsed && <span style={{ fontWeight: 600 }}>Bundle (4-in-1)</span>}
       </button>
 
-      {/* All element types */}
-      {ELEMENT_TYPE_LIST.map((type: ElementType) => {
+      {/* Remodel special button */}
+      <button
+        onClick={() => handleToolClick('Remodel')}
+        title="Remodel (4-in-1)"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: collapsed ? 0 : 8,
+          justifyContent: collapsed ? 'center' : 'flex-start',
+          padding: collapsed ? '10px 0' : '8px 12px',
+          margin: '2px 8px',
+          borderRadius: 8,
+          border: activeToolType === 'Remodel' ? '2px solid #3b82f6' : '2px solid #334155',
+          background: activeToolType === 'Remodel' ? 'rgba(59,130,246,0.15)' : '#1e293b',
+          cursor: 'pointer',
+          color: '#e2e8f0',
+          fontSize: 13,
+          width: collapsed ? '100%' : 'calc(100% - 16px)',
+          boxSizing: 'border-box',
+        }}
+      >
+        <span style={{ fontSize: 16 }}>⊟</span>
+        {!collapsed && <span style={{ fontWeight: 600 }}>Remodel (4-in-1)</span>}
+      </button>
+
+      {/* All element types — exclude ReadModel (replaced by Remodel 4-in-1) */}
+      {ELEMENT_TYPE_LIST.filter((t) => t !== 'ReadModel').map((type: ElementType) => {
         const config = ELEMENT_CONFIGS[type];
         return toolBtn(type, config.label, config.color);
       })}

@@ -13,7 +13,7 @@ import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { Minimap } from './Minimap';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
-import type { StickyNote as StickyNoteType, Bundle } from '../../types/elements';
+import type { StickyNote as StickyNoteType, Bundle, Remodel } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { screenToCanvas } from '../../utils/positionUtils';
 import { COLLAPSED_BUNDLE_W, COLLAPSED_BUNDLE_H } from '../../utils/linkUtils';
@@ -36,7 +36,7 @@ const DRAG_DROP_ANIMATION: DropAnimation = {
 };
 
 export const Board: React.FC = () => {
-  const { addNote, updateNote, addBundle, updateBundle, addLink, collapseAllBundles, expandAllBundles } = useBoardStore();
+  const { addNote, updateNote, addBundle, updateBundle, addRemodel, updateRemodel, addLink, collapseAllBundles, expandAllBundles } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
   const {
     zoom, panX, panY, setPan, activeToolType, setActiveToolType,
@@ -49,6 +49,7 @@ export const Board: React.FC = () => {
   const panStartRef = useRef({ mouseX: 0, mouseY: 0, panX: 0, panY: 0 });
   const draggedNoteStartPositions = useRef<Record<string, { x: number; y: number }>>({});
   const draggedBundleStart = useRef<{ id: string; x: number; y: number } | null>(null);
+  const draggedRemodelStart = useRef<{ id: string; x: number; y: number } | null>(null);
   const [activeDragId, setActiveDragId] = React.useState<string | null>(null);
 
   // Minimap: track canvas container dimensions via ResizeObserver
@@ -72,7 +73,7 @@ export const Board: React.FC = () => {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const handleLinkTarget = useCallback((targetId: string, targetType: 'note' | 'bundle') => {
+  const handleLinkTarget = useCallback((targetId: string, targetType: 'note' | 'bundle' | 'remodel') => {
     if (!linkFromId || !linkFromType) {
       setLinkFrom(targetId, targetType);
     } else {
@@ -139,6 +140,27 @@ export const Board: React.FC = () => {
         return;
       }
 
+      if (activeToolType === 'Remodel') {
+        const newRemodel: Remodel = {
+          id: uuidv4(),
+          position: {
+            x: canvasPos.x - (160 * 3 + 8 * 2) / 2,
+            y: canvasPos.y - (120 * 2 + 8) / 2,
+          },
+          aggregateNote: { label: '', content: '' },
+          parameterNote: { label: '', content: '' },
+          queryNote: { label: '', content: '' },
+          sourceEventNote: { label: '', content: '' },
+          linkedBundleIds: [],
+          zIndex: 10 + activeBoard.remodels.length + activeBoard.bundles.length,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        addRemodel(newRemodel);
+        setActiveToolType(null);
+        return;
+      }
+
       const config = ELEMENT_CONFIGS[activeToolType as keyof typeof ELEMENT_CONFIGS];
       if (!config) return;
 
@@ -159,7 +181,7 @@ export const Board: React.FC = () => {
       addNote(newNote);
       setActiveToolType(null);
     }
-  }, [zoom, panX, panY, activeToolType, setActiveToolType, activeBoard, addNote, addBundle, setSelectedNoteIds, isLinkingMode, setLinkFrom, setLinkingMode]);
+  }, [zoom, panX, panY, activeToolType, setActiveToolType, activeBoard, addNote, addBundle, addRemodel, setSelectedNoteIds, isLinkingMode, setLinkFrom, setLinkingMode]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isPanningRef.current) {
@@ -191,6 +213,15 @@ export const Board: React.FC = () => {
       const bundle = activeBoard.bundles.find((b) => b.id === bundleId);
       if (bundle) {
         draggedBundleStart.current = { id: bundleId, x: bundle.position.x, y: bundle.position.y };
+      }
+      return;
+    }
+
+    if (id.startsWith('remodel-')) {
+      const remodelId = id.replace('remodel-', '');
+      const remodel = activeBoard.remodels.find((r) => r.id === remodelId);
+      if (remodel) {
+        draggedRemodelStart.current = { id: remodelId, x: remodel.position.x, y: remodel.position.y };
       }
       return;
     }
@@ -229,6 +260,17 @@ export const Board: React.FC = () => {
       return;
     }
 
+    if (id.startsWith('remodel-')) {
+      const start = draggedRemodelStart.current;
+      if (start) {
+        updateRemodel(start.id, {
+          position: { x: start.x + scaledDx, y: start.y + scaledDy },
+        });
+        draggedRemodelStart.current = null;
+      }
+      return;
+    }
+
     const startPositions = draggedNoteStartPositions.current;
     const notesToMove = [id, ...selectedNoteIds.filter((s) => s !== id)];
 
@@ -245,12 +287,16 @@ export const Board: React.FC = () => {
     draggedNoteStartPositions.current = {};
   };
 
-  const activeNote = activeDragId && !activeDragId.startsWith('bundle-')
+  const activeNote = activeDragId && !activeDragId.startsWith('bundle-') && !activeDragId.startsWith('remodel-')
     ? activeBoard.notes.find((n) => n.id === activeDragId)
     : null;
 
   const activeBundle = activeDragId?.startsWith('bundle-')
     ? activeBoard.bundles.find((b) => b.id === activeDragId.replace('bundle-', ''))
+    : null;
+
+  const activeRemodel = activeDragId?.startsWith('remodel-')
+    ? activeBoard.remodels.find((r) => r.id === activeDragId.replace('remodel-', ''))
     : null;
 
   const handleNoteSelect = (id: string, multi: boolean) => {
@@ -466,11 +512,59 @@ export const Board: React.FC = () => {
             </div>
           );
         })()}
+        {activeRemodel && (() => {
+          const DRAG_TRANSFORM = 'scale(1.05) rotate(1.5deg)';
+          const DRAG_SHADOW = '0 8px 24px rgba(0,0,0,0.2)';
+          const SUB_W = 160 * zoom;
+          const SUB_H = 120 * zoom;
+          const GAP = 8 * zoom;
+          const totalW = SUB_W * 3 + GAP * 2;
+          const totalH = SUB_H * 2 + GAP;
+          const SubCard = ({ bgColor, label, left, top }: {
+            bgColor: string; label: string; left: number; top: number;
+          }) => (
+            <div style={{
+              position: 'absolute', left, top,
+              width: SUB_W, height: SUB_H,
+              backgroundColor: bgColor, borderRadius: 6,
+              boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+              display: 'flex', alignItems: 'flex-start',
+              padding: 8 * zoom, boxSizing: 'border-box',
+              overflow: 'hidden',
+            }}>
+              <span style={{
+                color: '#1e293b',
+                fontSize: 12 * zoom,
+                fontWeight: 700,
+                lineHeight: 1.3,
+                wordBreak: 'break-word',
+              }}>
+                {label || '—'}
+              </span>
+            </div>
+          );
+          return (
+            <div style={{
+              width: totalW,
+              height: totalH,
+              position: 'relative',
+              opacity: 0.45,
+              transform: DRAG_TRANSFORM,
+              filter: `drop-shadow(${DRAG_SHADOW})`,
+            }}>
+              <SubCard bgColor="#e9d5ff" label={activeRemodel.aggregateNote.label}    left={SUB_W + GAP}       top={0} />
+              <SubCard bgColor="#cffafe" label={activeRemodel.parameterNote.label}    left={0}                 top={SUB_H + GAP} />
+              <SubCard bgColor="#bfdbfe" label={activeRemodel.queryNote.label}        left={SUB_W + GAP}       top={SUB_H + GAP} />
+              <SubCard bgColor="#ede9fe" label={activeRemodel.sourceEventNote.label}  left={(SUB_W + GAP) * 2} top={SUB_H + GAP} />
+            </div>
+          );
+        })()}
       </DragOverlay>
     </DndContext>
     <Minimap
       notes={activeBoard.notes}
       bundles={activeBoard.bundles}
+      remodels={activeBoard.remodels}
       zoom={zoom}
       panX={panX}
       panY={panY}

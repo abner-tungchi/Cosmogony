@@ -19,11 +19,13 @@ export const LinkLayer: React.FC = () => {
       const dx = delta.x / zoom;
       const dy = delta.y / zoom;
       if (id.startsWith('bundle-')) {
-        setDrag({ noteIds: [], bundleIds: [id.replace('bundle-', '')], dx, dy });
+        setDrag({ noteIds: [], bundleIds: [id.replace('bundle-', '')], remodelIds: [], dx, dy });
+      } else if (id.startsWith('remodel-')) {
+        setDrag({ noteIds: [], bundleIds: [], remodelIds: [id.replace('remodel-', '')], dx, dy });
       } else {
         // if dragged note is selected, all selected notes move together
         const ids = selectedNoteIds.includes(id) ? selectedNoteIds : [id];
-        setDrag({ noteIds: ids, bundleIds: [], dx, dy });
+        setDrag({ noteIds: ids, bundleIds: [], remodelIds: [], dx, dy });
       }
     },
     onDragEnd()    { setDrag(null); },
@@ -48,7 +50,8 @@ export const LinkLayer: React.FC = () => {
           link.fromId, link.fromType,
           link.toId, link.toType,
           activeBoard.notes, activeBoard.bundles,
-          drag
+          drag,
+          activeBoard.remodels
         );
         if (!anchors) return null;
         return (

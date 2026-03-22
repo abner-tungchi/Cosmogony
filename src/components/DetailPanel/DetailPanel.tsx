@@ -712,23 +712,31 @@ export const DetailPanel: React.FC = () => {
     ? activeBoard.notes.find((n) => n.id === selectedElementId) ?? null
     : null;
 
+  const remodel = selectedElementType === 'remodel'
+    ? activeBoard.remodels.find((r) => r.id === selectedElementId) ?? null
+    : null;
+
   // If element no longer exists (deleted), close the panel
   useEffect(() => {
-    if (isOpen && !bundle && !note) {
+    if (isOpen && !bundle && !note && !remodel) {
       setSelectedElement(null, null);
     }
-  }, [isOpen, bundle, note, setSelectedElement]);
+  }, [isOpen, bundle, note, remodel, setSelectedElement]);
 
   const title = bundle
     ? (bundle.eventNote.label || 'Bundle')
     : note
     ? (note.label || note.type)
+    : remodel
+    ? (remodel.queryNote.label || remodel.aggregateNote.label || 'Remodel')
     : '';
 
   const subtitle = bundle
     ? `bundle · ${bundle.id.slice(0, 6)}`
     : note
     ? `${note.type} · ${note.id.slice(0, 6)}`
+    : remodel
+    ? `remodel · ${remodel.id.slice(0, 6)}`
     : '';
 
   return (
@@ -798,6 +806,17 @@ export const DetailPanel: React.FC = () => {
       <div style={{ flex: 1, paddingTop: 16 }}>
         {bundle && <BundlePanel bundle={bundle} flowPaths={activeBoard.flowPaths} />}
         {note && <NotePanel note={note} flowPaths={activeBoard.flowPaths} />}
+        {remodel && (
+          <div style={{ padding: '0 16px', color: '#94a3b8', fontSize: 13 }}>
+            {/* Remodel detail editing will be implemented in FE-010 */}
+            <div style={{ marginBottom: 8, fontWeight: 600, color: '#a78bfa', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Remodel
+            </div>
+            <div style={{ opacity: 0.6 }}>
+              Detail panel editing for Remodel coming soon (FE-010).
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

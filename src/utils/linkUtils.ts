@@ -1,9 +1,10 @@
-import type { StickyNote, Bundle } from '../types/elements';
+import type { StickyNote, Bundle, Remodel } from '../types/elements';
 
 export interface DragOffset {
-  noteIds: string[];   // note IDs currently being dragged
-  bundleIds: string[]; // bundle IDs currently being dragged
-  dx: number;          // canvas-coordinate offset (screen px / zoom)
+  noteIds: string[];    // note IDs currently being dragged
+  bundleIds: string[];  // bundle IDs currently being dragged
+  remodelIds: string[]; // remodel IDs currently being dragged
+  dx: number;           // canvas-coordinate offset (screen px / zoom)
   dy: number;
 }
 
@@ -38,6 +39,18 @@ function getBundleBounds(bundle: Bundle) {
     bottom: bundle.position.y + h,
     cx: bundle.position.x + w / 2,
     cy: bundle.position.y + h / 2,
+  };
+}
+
+function getRemodelBounds(remodel: Remodel) {
+  // Remodels are always expanded (same dimensions as expanded Bundle)
+  return {
+    left: remodel.position.x,
+    top: remodel.position.y,
+    right: remodel.position.x + BUNDLE_W,
+    bottom: remodel.position.y + BUNDLE_H,
+    cx: remodel.position.x + BUNDLE_W / 2,
+    cy: remodel.position.y + BUNDLE_H / 2,
   };
 }
 
@@ -77,12 +90,13 @@ function shiftBounds(b: Bounds, dx: number, dy: number): Bounds {
 
 export function getAnchorPoints(
   fromId: string,
-  fromType: 'note' | 'bundle',
+  fromType: 'note' | 'bundle' | 'remodel',
   toId: string,
-  toType: 'note' | 'bundle',
+  toType: 'note' | 'bundle' | 'remodel',
   notes: StickyNote[],
   bundles: Bundle[],
-  drag?: DragOffset | null
+  drag?: DragOffset | null,
+  remodels?: Remodel[]
 ): { fx: number; fy: number; tx: number; ty: number } | null {
   let fromBounds: Bounds | null = null;
   let toBounds: Bounds | null = null;
@@ -90,27 +104,36 @@ export function getAnchorPoints(
   if (fromType === 'note') {
     const note = notes.find((n) => n.id === fromId);
     if (note) fromBounds = getNoteBounds(note);
-  } else {
+  } else if (fromType === 'bundle') {
     const bundle = bundles.find((b) => b.id === fromId);
     if (bundle) fromBounds = getBundleBounds(bundle);
+  } else {
+    const remodel = remodels?.find((r) => r.id === fromId);
+    if (remodel) fromBounds = getRemodelBounds(remodel);
   }
 
   if (toType === 'note') {
     const note = notes.find((n) => n.id === toId);
     if (note) toBounds = getNoteBounds(note);
-  } else {
+  } else if (toType === 'bundle') {
     const bundle = bundles.find((b) => b.id === toId);
     if (bundle) toBounds = getBundleBounds(bundle);
+  } else {
+    const remodel = remodels?.find((r) => r.id === toId);
+    if (remodel) toBounds = getRemodelBounds(remodel);
   }
 
   if (!fromBounds || !toBounds) return null;
 
   // Apply live drag offset so links track the element while dragging
   if (drag) {
-    const fromIds = fromType === 'note' ? drag.noteIds : drag.bundleIds;
-    const toIds   = toType   === 'note' ? drag.noteIds : drag.bundleIds;
-    if (fromIds.includes(fromId)) fromBounds = shiftBounds(fromBounds, drag.dx, drag.dy);
-    if (toIds.includes(toId))     toBounds   = shiftBounds(toBounds,   drag.dx, drag.dy);
+    const getDragIds = (type: 'note' | 'bundle' | 'remodel') => {
+      if (type === 'note') return drag.noteIds;
+      if (type === 'bundle') return drag.bundleIds;
+      return drag.remodelIds;
+    };
+    if (getDragIds(fromType).includes(fromId)) fromBounds = shiftBounds(fromBounds, drag.dx, drag.dy);
+    if (getDragIds(toType).includes(toId))     toBounds   = shiftBounds(toBounds,   drag.dx, drag.dy);
   }
 
   return getBestAnchor(fromBounds, toBounds);

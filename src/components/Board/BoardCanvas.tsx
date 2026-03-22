@@ -4,6 +4,7 @@ import { useUIStore } from '../../store/uiStore';
 import { CanvasBackground } from '../Canvas/CanvasBackground';
 import { StickyNote } from '../StickyNote/StickyNote';
 import { Bundle } from '../Bundle/Bundle';
+import { Remodel } from '../Remodel/Remodel';
 import { LinkLayer } from '../Links/LinkLayer';
 import type { FlowPath } from '../../types/elements';
 import { PhaseLane } from './PhaseLane';
@@ -11,8 +12,8 @@ import { PhaseLane } from './PhaseLane';
 interface Props {
   selectedNoteIds: string[];
   onNoteSelect: (id: string, multi: boolean) => void;
-  onLinkTarget: (id: string, type: 'note' | 'bundle') => void;
-  onDetailClick: (id: string, type: 'bundle' | 'note') => void;
+  onLinkTarget: (id: string, type: 'note' | 'bundle' | 'remodel') => void;
+  onDetailClick: (id: string, type: 'bundle' | 'note' | 'remodel') => void;
 }
 
 export const BoardCanvas: React.FC<Props> = ({
@@ -33,7 +34,10 @@ export const BoardCanvas: React.FC<Props> = ({
   const filteredBundleCount = isPathFilterActive
     ? activeBoard.bundles.filter((b) => b.paths?.includes(activePath)).length
     : activeBoard.bundles.length;
-  const isEmptyState = isPathFilterActive && filteredNoteCount === 0 && filteredBundleCount === 0;
+  const filteredRemodelCount = isPathFilterActive
+    ? activeBoard.remodels.filter((r) => r.paths?.includes(activePath)).length
+    : activeBoard.remodels.length;
+  const isEmptyState = isPathFilterActive && filteredNoteCount === 0 && filteredBundleCount === 0 && filteredRemodelCount === 0;
   const containerRef = useRef<HTMLDivElement>(null);
 
   const handleWheel = useCallback(
@@ -87,6 +91,7 @@ export const BoardCanvas: React.FC<Props> = ({
       fitAll({
         notes: activeBoard.notes,
         bundles: activeBoard.bundles,
+        remodels: activeBoard.remodels,
         viewportWidth: width,
         viewportHeight: height,
       });
@@ -94,7 +99,7 @@ export const BoardCanvas: React.FC<Props> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [fitAll, activeBoard.notes, activeBoard.bundles]);
+  }, [fitAll, activeBoard.notes, activeBoard.bundles, activeBoard.remodels]);
 
   return (
     <div
@@ -124,6 +129,18 @@ export const BoardCanvas: React.FC<Props> = ({
             bundle={bundle}
             onLinkClick={onLinkTarget}
             onDetailClick={(id) => onDetailClick(id, 'bundle')}
+            activePath={activePath}
+            allPaths={allPaths}
+          />
+        ))}
+
+        {/* Remodels */}
+        {activeBoard.remodels.map((remodel) => (
+          <Remodel
+            key={remodel.id}
+            remodel={remodel}
+            onLinkTarget={onLinkTarget}
+            onDetailClick={(id) => onDetailClick(id, 'remodel')}
             activePath={activePath}
             allPaths={allPaths}
           />
