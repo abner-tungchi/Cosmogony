@@ -128,9 +128,9 @@ Board header 顯示 `{visible} / {total} events | {bundles} bundles`，切換 pa
 | 任務 ID | 標題 | 負責 Agent | 依賴 | 狀態 |
 |---------|------|-----------|------|------|
 | FE-009 | Remodel 核心功能（資料模型 + 元件 + 畫布整合） | frontend-engineer | — | ✅ 完成 |
-| FE-010 | Remodel Detail Panel + Bundle 連動 | frontend-engineer | FE-009 | 待開發 |
+| FE-010 | Remodel Detail Panel + Bundle 連動 | frontend-engineer | FE-009 | ✅ 完成 |
 | FE-011 | Actor PathBar 篩選器 | frontend-engineer | — | ✅ 完成 |
-| BE-003 | MCP 工具擴充（Remodel CRUD） | backend-engineer | FE-009 | 待開發 |
+| BE-003 | MCP 工具擴充（Remodel CRUD） | backend-engineer | FE-009 | ✅ 完成 |
 
 ---
 
