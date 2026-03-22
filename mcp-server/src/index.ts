@@ -24,6 +24,7 @@ interface FlowPath {
   name: string;
   color: string;
   description?: string;
+  actorId?: string;
 }
 
 interface StickyNote {
@@ -69,10 +70,33 @@ interface Link {
   id: string;
   fromId: string;
   toId: string;
-  fromType: 'note' | 'bundle';
-  toType: 'note' | 'bundle';
+  fromType: 'note' | 'bundle' | 'remodel';
+  toType: 'note' | 'bundle' | 'remodel';
   label?: string;
   createdAt: string;
+}
+
+interface Remodel {
+  id: string;
+  position: { x: number; y: number };
+
+  // Four sub-notes (reusing BundleSubNote, different semantics)
+  aggregateNote: BundleSubNote;   // top: Aggregate (read perspective)
+  parameterNote: BundleSubNote;   // bottom-left: Query parameters
+  queryNote: BundleSubNote;       // bottom-center: Query name
+  sourceEventNote: BundleSubNote; // bottom-right: Event Source description
+
+  // Bundle linkage
+  linkedBundleIds: string[];
+
+  // Metadata (consistent with Bundle)
+  zIndex: number;
+  collapsed?: boolean;
+  paths?: string[];
+  phase?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface Board {
@@ -80,6 +104,7 @@ interface Board {
   name: string;
   notes: StickyNote[];
   bundles: Bundle[];
+  remodels: Remodel[];
   links: Link[];
   flowPaths: FlowPath[];
   createdAt: string;
@@ -114,6 +139,7 @@ function createBoard(name: string): Board {
     name,
     notes: [],
     bundles: [],
+    remodels: [],
     links: [],
     flowPaths: [],
     createdAt: new Date().toISOString(),
@@ -124,14 +150,19 @@ function createBoard(name: string): Board {
 /** Migrate loaded project.json to ensure all new optional fields exist. */
 function migrateProject(p: Project): Project {
   for (const board of p.boards) {
-    const b = board as Board & { flowPaths?: FlowPath[] };
+    const b = board as Board & { flowPaths?: FlowPath[]; remodels?: Remodel[] };
     if (!b.flowPaths) b.flowPaths = [];
+    if (!b.remodels) b.remodels = [];
     for (const bundle of board.bundles) {
       if (!bundle.paths) bundle.paths = [];
       if (!bundle.policies) bundle.policies = [];
     }
     for (const note of board.notes) {
       if (!note.paths) note.paths = [];
+    }
+    for (const remodel of board.remodels) {
+      if (!remodel.paths) remodel.paths = [];
+      if (!remodel.linkedBundleIds) remodel.linkedBundleIds = [];
     }
   }
   return p;
@@ -165,6 +196,31 @@ function nextBundleX(): number {
   if (board.bundles.length === 0) return 80;
   const maxX = Math.max(...board.bundles.map((b) => b.position.x));
   return maxX + 736;
+}
+
+/** Returns the next auto-layout X for a new remodel: rightmost existing bundle/remodel X + 736, or 80 if none. */
+function nextRemodelX(): number {
+  const board = getActiveBoard();
+  const allElements = [
+    ...board.bundles.map((b) => b.position.x),
+    ...board.remodels.map((r) => r.position.x),
+  ];
+  if (allElements.length === 0) return 80;
+  return Math.max(...allElements) + 736;
+}
+
+/**
+ * Compute whether a Remodel spans more than one Aggregate Root.
+ * Rule: linkedBundleIds -> Bundle.infoNote.label; if > 1 unique non-empty label -> Universe.
+ */
+function isUniverseRemodel(remodel: Remodel, bundles: Bundle[]): boolean {
+  const linked = bundles.filter((b) => remodel.linkedBundleIds.includes(b.id));
+  const uniqueAggregates = new Set(
+    linked
+      .map((b) => b.infoNote.label.trim().toLowerCase())
+      .filter((label) => label.length > 0),
+  );
+  return uniqueAggregates.size > 1;
 }
 
 // ─── SSE subscribers ───────────────────────────────────────────────────────
@@ -325,6 +381,7 @@ server.tool(
         isActive: b.id === projectState.activeBoardId,
         noteCount: b.notes.length,
         bundleCount: b.bundles.length,
+        remodelCount: b.remodels.length,
         linkCount: b.links.length,
         flowPathCount: b.flowPaths.length,
         updatedAt: b.updatedAt,
@@ -415,12 +472,20 @@ server.tool(
 
 server.tool(
   'es_get_board',
-  'Return the active Bounded Context board JSON. Use this before incremental edits to read current state.',
+  'Return the active Bounded Context board JSON (includes remodels with computed _isUniverse field). Use this before incremental edits to read current state.',
   {},
   async () => {
     await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const boardWithComputed = {
+      ...board,
+      remodels: board.remodels.map((r) => ({
+        ...r,
+        _isUniverse: isUniverseRemodel(r, board.bundles),
+      })),
+    };
     return {
-      content: [{ type: 'text' as const, text: JSON.stringify(getActiveBoard(), null, 2) }],
+      content: [{ type: 'text' as const, text: JSON.stringify(boardWithComputed, null, 2) }],
     };
   }
 );
@@ -434,6 +499,7 @@ server.tool(
     const board = getActiveBoard();
     board.notes = [];
     board.bundles = [];
+    board.remodels = [];
     board.links = [];
     board.updatedAt = new Date().toISOString();
     projectState.updatedAt = board.updatedAt;
@@ -700,6 +766,152 @@ server.tool(
   }
 );
 
+// ─── Remodel tools ──────────────────────────────────────────────────────────
+
+server.tool(
+  'es_add_remodel',
+  `Add a Remodel (4-in-1 read-side card) to the active Bounded Context. Returns the full Remodel JSON including id.
+Remodel represents a Read Model projection in Event Sourcing architecture.
+Layout:
+  • Purple (top): Aggregate (read perspective)
+  • Cyan (bottom-left): Query Parameters
+  • Blue-grey (bottom-center): Query name (convention: "Get" + name, e.g. "GetOrderList")
+  • Lavender (bottom-right): Event Source description
+  • Remodel size: 496×248px; omit x/y for auto-layout (appended right of existing elements at y=520)`,
+  {
+    aggregateLabel: z.string().describe('Aggregate name for read perspective (top cell)'),
+    aggregateContent: z.string().optional().describe('Aggregate description'),
+    parameterLabel: z.string().describe('Query parameter name (bottom-left cell)'),
+    parameterContent: z.string().optional().describe('Parameter details'),
+    queryLabel: z.string().describe('Query name — convention: "Get" + name, e.g. "GetOrderList" (bottom-center cell)'),
+    queryContent: z.string().optional().describe('Query description'),
+    sourceEventLabel: z.string().describe('Event source summary (bottom-right cell)'),
+    sourceEventContent: z.string().optional().describe('Detailed event source description'),
+    linkedBundleIds: z.array(z.string()).optional().describe('IDs of Bundles whose domain events feed this Read Model (default: [])'),
+    x: z.number().optional().describe('X position (omit for auto-layout)'),
+    y: z.number().optional().describe('Y position (omit for auto-layout, defaults to 520)'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this remodel belongs to'),
+    phase: z.string().optional().describe('Phase or stage label'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
+  },
+  async ({ aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, sourceEventLabel, sourceEventContent, linkedBundleIds, x, y, paths, phase, notes }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const posX = x ?? nextRemodelX();
+    const posY = y ?? 520;
+    const now = new Date().toISOString();
+    const remodel: Remodel = {
+      id: uuidv4(),
+      position: { x: posX, y: posY },
+      aggregateNote: { label: aggregateLabel, content: aggregateContent ?? '' },
+      parameterNote: { label: parameterLabel, content: parameterContent ?? '' },
+      queryNote: { label: queryLabel, content: queryContent ?? '' },
+      sourceEventNote: { label: sourceEventLabel, content: sourceEventContent ?? '' },
+      linkedBundleIds: linkedBundleIds ?? [],
+      zIndex: board.remodels.length + board.bundles.length + 1,
+      paths: paths ?? [],
+      phase,
+      notes,
+      createdAt: now,
+      updatedAt: now,
+    };
+    board.remodels.push(remodel);
+    board.updatedAt = now;
+    projectState.updatedAt = now;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('add_remodel', remodel);
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) }, null, 2),
+      }],
+    };
+  }
+);
+
+server.tool(
+  'es_update_remodel',
+  'Update a Remodel\'s content, linked bundles, or metadata. All fields except id are optional (partial update — undefined fields are not overwritten).',
+  {
+    id: z.string().describe('Remodel ID to update'),
+    aggregateLabel: z.string().optional().describe('Aggregate name (top cell)'),
+    aggregateContent: z.string().optional().describe('Aggregate description'),
+    parameterLabel: z.string().optional().describe('Query parameter name (bottom-left cell)'),
+    parameterContent: z.string().optional().describe('Parameter details'),
+    queryLabel: z.string().optional().describe('Query name (bottom-center cell)'),
+    queryContent: z.string().optional().describe('Query description'),
+    sourceEventLabel: z.string().optional().describe('Event source summary (bottom-right cell)'),
+    sourceEventContent: z.string().optional().describe('Detailed event source description'),
+    linkedBundleIds: z.array(z.string()).optional().describe('Complete replacement of linked bundle IDs (not append)'),
+    x: z.number().optional().describe('New X position'),
+    y: z.number().optional().describe('New Y position'),
+    paths: z.array(z.string()).optional().describe('FlowPath IDs this remodel belongs to'),
+    phase: z.string().optional().describe('Phase or stage label'),
+    notes: z.string().optional().describe('Free-text annotations or remarks'),
+  },
+  async ({ id, aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, sourceEventLabel, sourceEventContent, linkedBundleIds, x, y, paths, phase, notes }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const remodel = board.remodels.find((r) => r.id === id);
+    if (!remodel) return { content: [{ type: 'text' as const, text: `Remodel ${id} not found.` }] };
+
+    if (x !== undefined) remodel.position.x = x;
+    if (y !== undefined) remodel.position.y = y;
+    // Sub-note merge: only update the fields that are explicitly provided
+    if (aggregateLabel !== undefined) remodel.aggregateNote.label = aggregateLabel;
+    if (aggregateContent !== undefined) remodel.aggregateNote.content = aggregateContent;
+    if (parameterLabel !== undefined) remodel.parameterNote.label = parameterLabel;
+    if (parameterContent !== undefined) remodel.parameterNote.content = parameterContent;
+    if (queryLabel !== undefined) remodel.queryNote.label = queryLabel;
+    if (queryContent !== undefined) remodel.queryNote.content = queryContent;
+    if (sourceEventLabel !== undefined) remodel.sourceEventNote.label = sourceEventLabel;
+    if (sourceEventContent !== undefined) remodel.sourceEventNote.content = sourceEventContent;
+    if (linkedBundleIds !== undefined) remodel.linkedBundleIds = linkedBundleIds;
+    if (paths !== undefined) remodel.paths = paths;
+    if (phase !== undefined) remodel.phase = phase;
+    if (notes !== undefined) remodel.notes = notes;
+
+    remodel.updatedAt = new Date().toISOString();
+    board.updatedAt = remodel.updatedAt;
+    projectState.updatedAt = remodel.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_remodel', { ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) });
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) }, null, 2),
+      }],
+    };
+  }
+);
+
+server.tool(
+  'es_delete_remodel',
+  'Delete a Remodel and all links where it is the source or target. Returns { success: true, deletedId }.',
+  { id: z.string().describe('Remodel ID to delete') },
+  async ({ id }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const exists = board.remodels.some((r) => r.id === id);
+    if (!exists) return { content: [{ type: 'text' as const, text: `Remodel ${id} not found.` }] };
+    board.remodels = board.remodels.filter((r) => r.id !== id);
+    board.links = board.links.filter((l) => l.fromId !== id && l.toId !== id);
+    board.updatedAt = new Date().toISOString();
+    projectState.updatedAt = board.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('delete_remodel', { id });
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ success: true, deletedId: id }),
+      }],
+    };
+  }
+);
+
 server.tool(
   'es_add_flow',
   `Create an entire Event Storming happy path by adding multiple Bundles in one call.
@@ -778,11 +990,11 @@ Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty)
 
 server.tool(
   'es_set_event_paths',
-  `Batch-assign FlowPath IDs to multiple bundles and/or notes in one call (overwrites existing paths — not append).
-Searches both bundles[] and notes[] so you can mix IDs freely.
+  `Batch-assign FlowPath IDs to multiple bundles, notes, and/or remodels in one call (overwrites existing paths — not append).
+Searches bundles[], notes[], and remodels[] so you can mix IDs freely.
 Returns { updated: string[], notFound: string[] }.`,
   {
-    ids: z.array(z.string()).describe('Bundle or Note IDs to update'),
+    ids: z.array(z.string()).describe('Bundle, Note, or Remodel IDs to update'),
     paths: z.array(z.string()).describe('FlowPath IDs to assign (replaces existing paths)'),
   },
   async ({ ids, paths }) => {
@@ -808,6 +1020,13 @@ Returns { updated: string[], notFound: string[] }.`,
         updated.push(id);
         continue;
       }
+      const remodel = board.remodels.find(r => r.id === id);
+      if (remodel) {
+        remodel.paths = paths;
+        remodel.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
       notFound.push(id);
     }
 
@@ -830,11 +1049,11 @@ Returns { updated: string[], notFound: string[] }.`,
 
 server.tool(
   'es_set_event_phase',
-  `Batch-assign a phase label to multiple bundles and/or notes in one call (overwrites existing phase).
-Searches both bundles[] and notes[] so you can mix IDs freely.
+  `Batch-assign a phase label to multiple bundles, notes, and/or remodels in one call (overwrites existing phase).
+Searches bundles[], notes[], and remodels[] so you can mix IDs freely.
 Returns { updated: string[], notFound: string[] }.`,
   {
-    ids: z.array(z.string()).describe('Bundle or Note IDs to update'),
+    ids: z.array(z.string()).describe('Bundle, Note, or Remodel IDs to update'),
     phase: z.string().describe('Phase label to assign (e.g. "Discovery", "Order Processing")'),
   },
   async ({ ids, phase }) => {
@@ -857,6 +1076,13 @@ Returns { updated: string[], notFound: string[] }.`,
       if (note) {
         note.phase = phase;
         note.updatedAt = now;
+        updated.push(id);
+        continue;
+      }
+      const remodel = board.remodels.find(r => r.id === id);
+      if (remodel) {
+        remodel.phase = phase;
+        remodel.updatedAt = now;
         updated.push(id);
         continue;
       }
@@ -936,12 +1162,12 @@ server.tool(
 
 server.tool(
   'es_add_link',
-  'Create a directional link between two elements (notes or bundles) in the active context. Returns { id }.',
+  'Create a directional link between two elements (notes, bundles, or remodels) in the active context. Returns { id }.',
   {
     fromId: z.string().describe('ID of the source element'),
-    fromType: z.enum(['note', 'bundle']).describe('Type of the source element'),
+    fromType: z.enum(['note', 'bundle', 'remodel']).describe('Type of the source element'),
     toId: z.string().describe('ID of the target element'),
-    toType: z.enum(['note', 'bundle']).describe('Type of the target element'),
+    toType: z.enum(['note', 'bundle', 'remodel']).describe('Type of the target element'),
     label: z.string().optional().describe('Optional label for the link'),
   },
   async ({ fromId, fromType, toId, toType, label }) => {
