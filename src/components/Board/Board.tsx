@@ -113,10 +113,37 @@ export const Board: React.FC = () => {
         }
       }
 
+      // Special case: Remodel ↔ Dto note — auto-populate linkedDtoIds
+      let remodelForDto: string | null = null;
+      let dtoNoteId: string | null = null;
+
+      if (linkFromType === 'remodel' && targetType === 'note') {
+        const targetNote = activeBoard.notes.find((n) => n.id === targetId);
+        if (targetNote?.type === 'Dto') {
+          remodelForDto = linkFromId;
+          dtoNoteId = targetId;
+        }
+      } else if (linkFromType === 'note' && targetType === 'remodel') {
+        const fromNote = activeBoard.notes.find((n) => n.id === linkFromId);
+        if (fromNote?.type === 'Dto') {
+          remodelForDto = targetId;
+          dtoNoteId = linkFromId;
+        }
+      }
+
+      if (remodelForDto && dtoNoteId) {
+        const remodel = activeBoard.remodels.find((r) => r.id === remodelForDto);
+        if (remodel && !remodel.linkedDtoIds.includes(dtoNoteId)) {
+          updateRemodel(remodelForDto, {
+            linkedDtoIds: [...remodel.linkedDtoIds, dtoNoteId],
+          });
+        }
+      }
+
       setLinkFrom(null, null);
       setLinkingMode(false);
     }
-  }, [linkFromId, linkFromType, addLink, setLinkFrom, setLinkingMode, activeBoard.remodels, updateRemodel]);
+  }, [linkFromId, linkFromType, addLink, setLinkFrom, setLinkingMode, activeBoard.remodels, activeBoard.notes, updateRemodel]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button === 1 || e.button === 2) {
@@ -189,10 +216,13 @@ export const Board: React.FC = () => {
       const config = ELEMENT_CONFIGS[activeToolType as keyof typeof ELEMENT_CONFIGS];
       if (!config) return;
 
+      const DEFAULT_DTO_LABEL = '[DtoName]\n----------\nfield: Type';
+      const noteLabel = activeToolType === 'Dto' ? DEFAULT_DTO_LABEL : config.label;
+
       const newNote: StickyNoteType = {
         id: uuidv4(),
         type: activeToolType as StickyNoteType['type'],
-        label: config.label,
+        label: noteLabel,
         position: {
           x: canvasPos.x - config.defaultSize.width / 2,
           y: canvasPos.y - config.defaultSize.height / 2,

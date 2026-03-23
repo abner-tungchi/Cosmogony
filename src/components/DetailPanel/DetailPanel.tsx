@@ -690,9 +690,10 @@ interface RemodelPanelProps {
   remodel: Remodel;
   flowPaths: FlowPath[];
   allBundles: Bundle[];
+  allNotes: StickyNote[];
 }
 
-const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBundles }) => {
+const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBundles, allNotes }) => {
   const { updateRemodel } = useBoardStore();
 
   // Local state for sub-note fields
@@ -712,6 +713,11 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
   const [bundleSearchQuery, setBundleSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Linked DTOs dropdown state
+  const [showDtoDropdown, setShowDtoDropdown] = useState(false);
+  const [dtoSearchQuery, setDtoSearchQuery] = useState('');
+  const dtosDropdownRef = useRef<HTMLDivElement>(null);
+
   // Sync when switching between remodels
   useEffect(() => {
     setAggregateLabel(remodel.aggregateNote.label);
@@ -726,9 +732,11 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     setNotes(remodel.notes ?? '');
     setShowBundleDropdown(false);
     setBundleSearchQuery('');
+    setShowDtoDropdown(false);
+    setDtoSearchQuery('');
   }, [remodel.id]);
 
-  // Close dropdown on outside click
+  // Close bundle dropdown on outside click
   useEffect(() => {
     if (!showBundleDropdown) return;
     const handleOutsideClick = (e: MouseEvent) => {
@@ -739,6 +747,18 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showBundleDropdown]);
+
+  // Close DTO dropdown on outside click
+  useEffect(() => {
+    if (!showDtoDropdown) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (dtosDropdownRef.current && !dtosDropdownRef.current.contains(e.target as Node)) {
+        setShowDtoDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showDtoDropdown]);
 
   const saveAggregateNote = useCallback(() => {
     updateRemodel(remodel.id, { aggregateNote: { label: aggregateLabel, content: aggregateContent } });
@@ -785,6 +805,29 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     setShowBundleDropdown(false);
     setBundleSearchQuery('');
   };
+
+  const removeDtoLink = (dtoId: string) => {
+    updateRemodel(remodel.id, {
+      linkedDtoIds: remodel.linkedDtoIds.filter((id) => id !== dtoId),
+    });
+  };
+
+  const addDtoLink = (dtoId: string) => {
+    if (remodel.linkedDtoIds.includes(dtoId)) return;
+    updateRemodel(remodel.id, {
+      linkedDtoIds: [...remodel.linkedDtoIds, dtoId],
+    });
+    setShowDtoDropdown(false);
+    setDtoSearchQuery('');
+  };
+
+  // All Dto notes on the board
+  const allDtoNotes = allNotes.filter((n) => n.type === 'Dto');
+  const availableDtoNotes = allDtoNotes.filter((n) => !remodel.linkedDtoIds.includes(n.id));
+  const filteredAvailableDtos = availableDtoNotes.filter((n) => {
+    const q = dtoSearchQuery.toLowerCase();
+    return n.label.toLowerCase().includes(q);
+  });
 
   // Universe status computed values
   const universe = isUniverseRemodel(remodel, allBundles);
@@ -1096,6 +1139,164 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
         </div>
       )}
 
+      {/* LINKED DTOS section */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Linked DTOs</SectionLabel>
+
+        {/* Existing linked DTOs as chips */}
+        {remodel.linkedDtoIds.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+            {remodel.linkedDtoIds.map((linkedId) => {
+              const linkedDto = allDtoNotes.find((n) => n.id === linkedId);
+              const isDeleted = !linkedDto;
+              const rawLabel = linkedDto ? linkedDto.label : '';
+              const displayLabel = linkedDto
+                ? (rawLabel.split('\n')[0].trim() || '(Unnamed DTO)')
+                : '(Deleted DTO)';
+
+              return (
+                <div
+                  key={linkedId}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: isDeleted ? 'rgba(255,255,255,0.03)' : 'rgba(134,239,172,0.08)',
+                    border: `1px solid ${isDeleted ? 'rgba(255,255,255,0.06)' : 'rgba(134,239,172,0.2)'}`,
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                  }}
+                >
+                  <span style={{
+                    fontSize: 12,
+                    color: isDeleted ? TEXT_MUTED : '#86efac',
+                    fontStyle: isDeleted ? 'italic' : 'normal',
+                    fontFamily: isDeleted ? 'inherit' : '"Courier New", Courier, monospace',
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {displayLabel}
+                  </span>
+                  <button
+                    onClick={() => removeDtoLink(linkedId)}
+                    title={isDeleted ? '清理此連結' : '移除連結'}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: TEXT_MUTED,
+                      cursor: 'pointer',
+                      fontSize: 14,
+                      padding: '0 0 0 8px',
+                      lineHeight: 1,
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Add DTO dropdown */}
+        <div ref={dtosDropdownRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowDtoDropdown((v) => !v)}
+            style={{
+              background: 'none',
+              border: '1px dashed rgba(134,239,172,0.25)',
+              borderRadius: 4,
+              color: TEXT_MUTED,
+              cursor: 'pointer',
+              fontSize: 12,
+              padding: '5px 10px',
+              width: '100%',
+              textAlign: 'left',
+            }}
+          >
+            + Link DTO
+          </button>
+
+          {showDtoDropdown && (
+            <div style={{
+              position: 'absolute',
+              top: '100%',
+              left: 0,
+              right: 0,
+              marginTop: 4,
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              zIndex: 100,
+              overflow: 'hidden',
+            }}>
+              {/* Search input */}
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={dtoSearchQuery}
+                  onChange={(e) => setDtoSearchQuery(e.target.value)}
+                  placeholder="Search DTOs..."
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    color: TEXT_MAIN,
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              {/* DTO options */}
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {filteredAvailableDtos.length === 0 ? (
+                  <div style={{ padding: '8px 12px', fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+                    {availableDtoNotes.length === 0 ? 'No DTOs on this board' : 'No matching DTOs'}
+                  </div>
+                ) : (
+                  filteredAvailableDtos.map((dto) => {
+                    const firstLine = dto.label.split('\n')[0].trim() || '(Unnamed DTO)';
+                    return (
+                      <button
+                        key={dto.id}
+                        onClick={() => addDtoLink(dto.id)}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          padding: '8px 12px',
+                          background: 'none',
+                          border: 'none',
+                          color: TEXT_MAIN,
+                          fontSize: 12,
+                          cursor: 'pointer',
+                          fontFamily: '"Courier New", Courier, monospace',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        {firstLine}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Divider */}
       <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 20 }} />
 
@@ -1314,6 +1515,7 @@ export const DetailPanel: React.FC = () => {
             remodel={remodel}
             flowPaths={activeBoard.flowPaths}
             allBundles={activeBoard.bundles}
+            allNotes={activeBoard.notes}
           />
         )}
       </div>

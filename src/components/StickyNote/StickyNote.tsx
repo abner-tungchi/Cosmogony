@@ -6,6 +6,57 @@ import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { PathDots } from '../PathBar/PathDots';
 
+// ─── Dto Note Body ────────────────────────────────────────────────────────────
+
+const DTO_MONO_FONT = '"Menlo", "Monaco", "Courier New", monospace';
+
+interface DtoNoteBodyProps {
+  label: string;
+  textColor: string;
+}
+
+const DtoNoteBody: React.FC<DtoNoteBodyProps> = ({ label, textColor }) => {
+  const lines = label.split('\n');
+  const nameLine = lines[0] ?? '';
+  const fieldLines = lines.slice(1).join('\n');
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+      {/* DTO name */}
+      <div style={{
+        fontSize: '13px',
+        fontWeight: 700,
+        color: textColor,
+        borderBottom: '1px solid rgba(0,0,0,0.12)',
+        paddingBottom: 4,
+        marginBottom: 4,
+        flexShrink: 0,
+        wordBreak: 'break-word',
+      }}>
+        {nameLine || <span style={{ opacity: 0.4, fontWeight: 400 }}>DtoName</span>}
+      </div>
+
+      {/* Field list */}
+      <div style={{
+        flex: 1,
+        fontFamily: DTO_MONO_FONT,
+        fontSize: '10px',
+        lineHeight: 1.5,
+        color: 'rgba(0,0,0,0.7)',
+        whiteSpace: 'pre-wrap',
+        overflowY: 'auto',
+        wordBreak: 'break-all',
+      }}>
+        {fieldLines || (
+          <span style={{ opacity: 0.4, fontStyle: 'italic' }}>Double-click to add fields</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
 interface Props {
   note: StickyNoteType;
   isSelected: boolean;
@@ -38,6 +89,7 @@ export const StickyNote: React.FC<Props> = ({
 
   const config = ELEMENT_CONFIGS[note.type];
   const isDiamond = note.type === 'Diamond';
+  const isDto = note.type === 'Dto';
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: note.id,
@@ -83,6 +135,18 @@ export const StickyNote: React.FC<Props> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Dto notes are multiline — Enter inserts newline; only Escape or Ctrl+Enter saves
+    if (isDto) {
+      if (e.key === 'Escape') {
+        setIsEditing(false);
+        setEditText(note.label);
+      } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        setIsEditing(false);
+        updateNote(note.id, { label: editText });
+      }
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       setIsEditing(false);
@@ -289,19 +353,21 @@ export const StickyNote: React.FC<Props> = ({
       onMouseDown={(e) => e.stopPropagation()}
       {...(isEditing || isLinkingMode ? {} : { ...listeners, ...attributes })}
     >
-      <div
-        style={{
-          fontSize: `${10 / zoom}px`,
-          fontWeight: 600,
-          opacity: 0.8,
-          textTransform: 'uppercase',
-          letterSpacing: '0.05em',
-          marginBottom: '4px',
-          flexShrink: 0,
-        }}
-      >
-        {config.label}
-      </div>
+      {!isDto && (
+        <div
+          style={{
+            fontSize: `${10 / zoom}px`,
+            fontWeight: 600,
+            opacity: 0.8,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            marginBottom: '4px',
+            flexShrink: 0,
+          }}
+        >
+          {config.label}
+        </div>
+      )}
 
       {isEditing ? (
         <textarea
@@ -317,12 +383,14 @@ export const StickyNote: React.FC<Props> = ({
             border: 'none',
             outline: 'none',
             color: config.textColor,
-            fontSize: `${13 / zoom}px`,
+            fontSize: isDto ? '11px' : `${13 / zoom}px`,
             resize: 'none',
             cursor: 'text',
-            fontFamily: 'inherit',
+            fontFamily: isDto ? '"Menlo", "Monaco", "Courier New", monospace' : 'inherit',
           }}
         />
+      ) : isDto ? (
+        <DtoNoteBody label={note.label} textColor={config.textColor} />
       ) : (
         <div
           style={{

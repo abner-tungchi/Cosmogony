@@ -21,6 +21,7 @@ const iconMap: Record<string, string> = {
   ReadModel: '📊',
   Hotspot: '❓',
   Diamond: '◆',
+  Dto: '{}',
 };
 
 export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, currentView }) => {

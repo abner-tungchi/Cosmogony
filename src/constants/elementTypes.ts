@@ -72,9 +72,16 @@ export const ELEMENT_CONFIGS: Record<ElementType, ElementConfig> = {
     textColor: '#ffffff',
     defaultSize: { width: 160, height: 160 },
   },
+  Dto: {
+    type: 'Dto',
+    label: 'DTO',
+    color: '#86efac',
+    textColor: '#14532d',
+    defaultSize: { width: 200, height: 160 },
+  },
 };
 
 export const ELEMENT_TYPE_LIST: ElementType[] = [
   'DomainEvent', 'Command', 'Aggregate', 'Policy',
-  'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond',
+  'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto',
 ];
