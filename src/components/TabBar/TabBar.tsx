@@ -10,7 +10,13 @@ export const TabBar: React.FC = () => {
   const [editName, setEditName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const openBoards = project.boards.filter((b) => project.openBoardIds.includes(b.id));
+  // Only show context-level boards as tabs (not actor sub-boards)
+  const openBoards = project.boards.filter(
+    (b) => project.openBoardIds.includes(b.id) && !b.parentContextId
+  );
+
+  // When viewing an actor sub-board, highlight the parent context tab instead
+  const effectiveContextId = activeBoard.parentContextId ?? activeBoard.id;
 
   const handleAddBoard = () => {
     addBoard('New Context');
@@ -95,7 +101,7 @@ export const TabBar: React.FC = () => {
 
       {/* Open context tabs */}
       {openBoards.map((board) => {
-        const isActive = board.id === project.activeBoardId && currentView === 'board';
+        const isActive = board.id === effectiveContextId && currentView === 'board';
         return (
           <div
             key={board.id}

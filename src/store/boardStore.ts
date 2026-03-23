@@ -5,10 +5,11 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Board, Project, BoardStore } from '../types/board';
 import type { StickyNote, Bundle, Link, FlowPath, Remodel } from '../types/elements';
 
-function createBoard(name: string): Board {
+function createBoard(name: string, parentContextId?: string): Board {
   return {
     id: uuidv4(),
     name,
+    parentContextId,
     notes: [],
     bundles: [],
     remodels: [],
@@ -67,13 +68,38 @@ export const useBoardStore = create<BoardStore>()(
         return newBoard.id;
       },
 
+      addActorBoard: (contextId, name) => {
+        const newBoard = createBoard(name, contextId);
+        set((state) => {
+          state.project.boards.push(newBoard);
+          // Actor boards are NOT added to openBoardIds — navigated via PathBar only
+          // But ensure the parent context is in openBoardIds (so its tab shows)
+          if (!state.project.openBoardIds.includes(contextId)) {
+            state.project.openBoardIds.push(contextId);
+          }
+          state.project.activeBoardId = newBoard.id;
+          state.project.updatedAt = new Date().toISOString();
+        });
+        return newBoard.id;
+      },
+
       deleteBoard: (id) =>
         set((state) => {
-          if (state.project.boards.length <= 1) return;
-          state.project.boards = state.project.boards.filter((b: Board) => b.id !== id);
-          state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => i !== id);
-          if (state.project.activeBoardId === id) {
-            state.project.activeBoardId = state.project.openBoardIds[0] ?? state.project.boards[0].id;
+          const toDelete = new Set(
+            state.project.boards
+              .filter((b: Board) => b.id === id || b.parentContextId === id)
+              .map((b: Board) => b.id)
+          );
+          const remainingContextBoards = state.project.boards.filter(
+            (b: Board) => !toDelete.has(b.id) && !b.parentContextId
+          );
+          if (remainingContextBoards.length === 0) return; // guard: keep at least 1 context
+
+          state.project.boards = state.project.boards.filter((b: Board) => !toDelete.has(b.id));
+          state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => !toDelete.has(i));
+          if (toDelete.has(state.project.activeBoardId)) {
+            state.project.activeBoardId =
+              state.project.openBoardIds[0] ?? remainingContextBoards[0].id;
           }
           state.project.updatedAt = new Date().toISOString();
         }),
@@ -82,7 +108,12 @@ export const useBoardStore = create<BoardStore>()(
         set((state) => {
           state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => i !== id);
           if (state.project.activeBoardId === id) {
-            state.project.activeBoardId = state.project.openBoardIds[0] ?? state.project.boards[0].id;
+            const closingBoard = state.project.boards.find((b: Board) => b.id === id);
+            const fallbackId =
+              closingBoard?.parentContextId ??
+              state.project.openBoardIds[0] ??
+              state.project.boards.find((b: Board) => !b.parentContextId)?.id;
+            state.project.activeBoardId = fallbackId ?? state.project.boards[0].id;
           }
           state.project.updatedAt = new Date().toISOString();
         }),
@@ -334,7 +365,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 7,
+      version: 8,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -465,6 +496,12 @@ export const useBoardStore = create<BoardStore>()(
               }
             }
           }
+          // fall through to v8 migration
+        }
+
+        if (version < 8) {
+          // v7 → v8: add parentContextId field — optional, no data transform needed
+          // parentContextId is undefined for all existing boards (they are all context-level)
           return persistedState as BoardStore;
         }
 

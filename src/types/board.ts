@@ -3,6 +3,7 @@ import type { StickyNote, Bundle, Link, FlowPath, Remodel } from './elements';
 export interface Board {
   id: string;
   name: string;
+  parentContextId?: string;   // if set, this is an actor sub-board inside a context
   notes: StickyNote[];
   bundles: Bundle[];
   remodels: Remodel[];
@@ -44,6 +45,7 @@ export interface BoardStore {
   setProjectName: (name: string) => void;
   setBoardName: (name: string) => void; // legacy alias
   addBoard: (name: string) => string;   // creates + opens, returns new board id
+  addActorBoard: (contextId: string, name: string) => string; // creates actor sub-board under a context
   deleteBoard: (id: string) => void;    // permanent delete from project
   closeBoard: (id: string) => void;     // remove from openBoardIds, keep in project
   openBoard: (id: string) => void;      // add to openBoardIds, set active

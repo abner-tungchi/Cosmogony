@@ -11,20 +11,39 @@ type ContextMenuState =
 
 export const PathBar: React.FC = () => {
   const activeBoard = useBoardStore(selectActiveBoard);
-  const { addFlowPath, updateFlowPath, deleteFlowPath } = useBoardStore();
-  const { activePath, setActivePath, activeActorFilter, setActiveActorFilter } = useUIStore();
+  const { addFlowPath, updateFlowPath, deleteFlowPath, addActorBoard, setActiveBoard } =
+    useBoardStore();
+  const project = useBoardStore((s) => s.project);
+  const { activePath, setActivePath, activeActorFilter } = useUIStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingPath, setEditingPath] = useState<FlowPath | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({ open: false });
   const [actorDropdownOpen, setActorDropdownOpen] = useState(false);
+  const [actorDropdownPos, setActorDropdownPos] = useState<{ top: number; left: number } | null>(
+    null,
+  );
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const actorDropdownRef = useRef<HTMLDivElement>(null);
+  const actorButtonRef = useRef<HTMLButtonElement>(null);
 
+  // Actor notes on current board — passed to PathModal
   const actorNotes = useMemo(
     () => activeBoard.notes.filter((n) => n.type === 'Actor'),
     [activeBoard.notes],
   );
+
+  // Active context: if current board is an actor sub-board, use its parentContextId; else use its own id
+  const currentContextId = useMemo(() => {
+    const active = project.boards.find((b) => b.id === project.activeBoardId);
+    return active?.parentContextId ?? active?.id ?? null;
+  }, [project.boards, project.activeBoardId]);
+
+  // Actor sub-boards under the current context
+  const actorSubBoards = useMemo(() => {
+    if (!currentContextId) return [];
+    return project.boards.filter((b) => b.parentContextId === currentContextId);
+  }, [project.boards, currentContextId]);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -38,12 +57,17 @@ export const PathBar: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClick);
   }, [contextMenu.open]);
 
-  // Close actor dropdown on outside click
+  // Close actor dropdown on outside click (exclude both the dropdown and the trigger button)
   useEffect(() => {
     if (!actorDropdownOpen) return;
     const handleClick = (e: MouseEvent) => {
-      if (actorDropdownRef.current && !actorDropdownRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const insideDropdown =
+        actorDropdownRef.current && actorDropdownRef.current.contains(target);
+      const insideButton = actorButtonRef.current && actorButtonRef.current.contains(target);
+      if (!insideDropdown && !insideButton) {
         setActorDropdownOpen(false);
+        setActorDropdownPos(null);
       }
     };
     document.addEventListener('mousedown', handleClick);
@@ -56,16 +80,6 @@ export const PathBar: React.FC = () => {
       setActivePath(null);
     }
   }, [activeBoard.flowPaths, activePath, setActivePath]);
-
-  // If selected Actor was deleted, reset actor filter to null
-  useEffect(() => {
-    if (
-      activeActorFilter &&
-      !activeBoard.notes.some((n) => n.id === activeActorFilter && n.type === 'Actor')
-    ) {
-      setActiveActorFilter(null);
-    }
-  }, [activeBoard.notes, activeActorFilter, setActiveActorFilter]);
 
   // Filtered paths based on active actor filter
   const filteredPaths = useMemo<FlowPath[]>(() => {
@@ -137,10 +151,10 @@ export const PathBar: React.FC = () => {
   };
 
   const selectedActorLabel = useMemo(() => {
-    if (!activeActorFilter) return 'All Actors';
-    const actor = actorNotes.find((n) => n.id === activeActorFilter);
-    return actor ? actor.label || '(Unnamed Actor)' : 'All Actors';
-  }, [activeActorFilter, actorNotes]);
+    if (project.activeBoardId === currentContextId) return 'All Actors';
+    const actorBoard = actorSubBoards.find((b) => b.id === project.activeBoardId);
+    return actorBoard?.name || 'All Actors';
+  }, [project.activeBoardId, currentContextId, actorSubBoards]);
 
   return (
     <>
@@ -174,123 +188,43 @@ export const PathBar: React.FC = () => {
           PATH
         </span>
 
-        {/* Actor filter dropdown */}
-        <div ref={actorDropdownRef} style={{ position: 'relative', flexShrink: 0 }}>
-          <button
-            onClick={() => setActorDropdownOpen((prev) => !prev)}
-            style={{
-              height: 28,
-              padding: '0 10px',
-              borderRadius: 14,
-              fontSize: 11,
-              fontWeight: activeActorFilter ? 600 : 500,
-              background: activeActorFilter ? 'rgba(59,130,246,0.08)' : 'transparent',
-              color: activeActorFilter ? '#3b82f6' : '#64748b',
-              border: `1px solid ${activeActorFilter ? 'rgba(59,130,246,0.3)' : 'rgba(0,0,0,0.08)'}`,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              transition: 'all 150ms ease',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <span style={{ fontSize: 12 }}>👤</span>
-            {selectedActorLabel}
-            <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 2 }}>▾</span>
-          </button>
-
-          {actorDropdownOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 4px)',
-                left: 0,
-                background: '#ffffff',
-                border: '1px solid rgba(0,0,0,0.1)',
-                borderRadius: 8,
-                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                zIndex: 9500,
-                minWidth: 160,
-                maxHeight: 200,
-                overflowY: 'auto',
-              }}
-            >
-              {/* "All Actors" option */}
-              <button
-                onClick={() => {
-                  setActiveActorFilter(null);
-                  setActorDropdownOpen(false);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: 'none',
-                  background: activeActorFilter === null ? 'rgba(59,130,246,0.06)' : 'transparent',
-                  textAlign: 'left',
-                  fontSize: 12,
-                  color: activeActorFilter === null ? '#3b82f6' : '#1e293b',
-                  fontWeight: activeActorFilter === null ? 600 : 400,
-                  cursor: 'pointer',
-                  transition: 'background 100ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  if (activeActorFilter !== null) e.currentTarget.style.background = '#f8fafc';
-                }}
-                onMouseLeave={(e) => {
-                  if (activeActorFilter !== null) e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <span style={{ fontSize: 12 }}>👤</span>
-                All Actors
-              </button>
-
-              {actorNotes.length > 0 && (
-                <div style={{ height: 1, background: 'rgba(0,0,0,0.06)', margin: '0 8px' }} />
-              )}
-
-              {actorNotes.map((actor) => (
-                <button
-                  key={actor.id}
-                  onClick={() => {
-                    setActiveActorFilter(actor.id);
-                    setActorDropdownOpen(false);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    width: '100%',
-                    padding: '8px 12px',
-                    border: 'none',
-                    background:
-                      activeActorFilter === actor.id ? 'rgba(59,130,246,0.06)' : 'transparent',
-                    textAlign: 'left',
-                    fontSize: 12,
-                    color: activeActorFilter === actor.id ? '#3b82f6' : '#1e293b',
-                    fontWeight: activeActorFilter === actor.id ? 600 : 400,
-                    cursor: 'pointer',
-                    transition: 'background 100ms ease',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (activeActorFilter !== actor.id)
-                      e.currentTarget.style.background = '#f8fafc';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (activeActorFilter !== actor.id)
-                      e.currentTarget.style.background = 'transparent';
-                  }}
-                >
-                  <span style={{ fontSize: 12 }}>👤</span>
-                  {actor.label || '(Unnamed Actor)'}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Actor filter / board switcher dropdown trigger */}
+        <button
+          ref={actorButtonRef}
+          onClick={() => {
+            if (actorDropdownOpen) {
+              setActorDropdownOpen(false);
+              setActorDropdownPos(null);
+            } else {
+              const rect = actorButtonRef.current?.getBoundingClientRect();
+              if (rect) {
+                setActorDropdownPos({ top: rect.bottom + 4, left: rect.left });
+              }
+              setActorDropdownOpen(true);
+            }
+          }}
+          style={{
+            height: 28,
+            padding: '0 10px',
+            borderRadius: 14,
+            fontSize: 11,
+            fontWeight: project.activeBoardId !== currentContextId ? 600 : 500,
+            background: project.activeBoardId !== currentContextId ? 'rgba(59,130,246,0.08)' : 'transparent',
+            color: project.activeBoardId !== currentContextId ? '#3b82f6' : '#64748b',
+            border: `1px solid ${project.activeBoardId !== currentContextId ? 'rgba(59,130,246,0.3)' : 'rgba(0,0,0,0.08)'}`,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            transition: 'all 150ms ease',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontSize: 12 }}>👤</span>
+          {selectedActorLabel}
+          <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 2 }}>▾</span>
+        </button>
 
         {/* Separator */}
         <div
@@ -412,6 +346,155 @@ export const PathBar: React.FC = () => {
           + New Path
         </button>
       </div>
+
+      {/* Actor dropdown — rendered at fixed position to escape stacking context */}
+      {actorDropdownOpen && actorDropdownPos && (
+        <div
+          ref={actorDropdownRef}
+          style={{
+            position: 'fixed',
+            top: actorDropdownPos.top,
+            left: actorDropdownPos.left,
+            background: '#ffffff',
+            border: '1px solid rgba(0,0,0,0.1)',
+            borderRadius: 8,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            zIndex: 99999,
+            minWidth: 200,
+            maxHeight: 280,
+            overflowY: 'auto',
+          }}
+        >
+          {/* "All Actors" option — navigates back to the parent context board */}
+          <button
+            onClick={() => {
+              if (currentContextId) setActiveBoard(currentContextId);
+              setActorDropdownOpen(false);
+              setActorDropdownPos(null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              padding: '8px 12px',
+              border: 'none',
+              background: project.activeBoardId === currentContextId ? 'rgba(59,130,246,0.06)' : 'transparent',
+              textAlign: 'left',
+              fontSize: 12,
+              color: project.activeBoardId === currentContextId ? '#3b82f6' : '#1e293b',
+              fontWeight: project.activeBoardId === currentContextId ? 600 : 400,
+              cursor: 'pointer',
+              transition: 'background 100ms ease',
+            }}
+            onMouseEnter={(e) => {
+              if (project.activeBoardId !== currentContextId) e.currentTarget.style.background = '#f8fafc';
+            }}
+            onMouseLeave={(e) => {
+              if (project.activeBoardId !== currentContextId) e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <span style={{ fontSize: 12 }}>👤</span>
+            All Actors
+          </button>
+
+          {actorSubBoards.length > 0 && (
+            <div style={{ height: 1, background: 'rgba(0,0,0,0.06)', margin: '0 8px' }} />
+          )}
+
+          {/* Actor sub-board list */}
+          {actorSubBoards.map((actorBoard) => {
+            const isSelected = actorBoard.id === project.activeBoardId;
+            return (
+              <button
+                key={actorBoard.id}
+                onClick={() => {
+                  setActiveBoard(actorBoard.id);
+                  setActorDropdownOpen(false);
+                  setActorDropdownPos(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  padding: '8px 12px',
+                  border: 'none',
+                  background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent',
+                  textAlign: 'left',
+                  fontSize: 12,
+                  color: isSelected ? '#3b82f6' : '#1e293b',
+                  fontWeight: isSelected ? 600 : 400,
+                  cursor: 'pointer',
+                  transition: 'background 100ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = '#f8fafc';
+                }}
+                onMouseLeave={(e) => {
+                  if (!isSelected) e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <span style={{ fontSize: 12 }}>👤</span>
+                <span style={{ flex: 1 }}>{actorBoard.name}</span>
+                {isSelected && (
+                  <span
+                    style={{
+                      fontSize: 10,
+                      color: '#3b82f6',
+                      background: 'rgba(59,130,246,0.08)',
+                      borderRadius: 4,
+                      padding: '1px 5px',
+                    }}
+                  >
+                    active
+                  </span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* "+ New Actor Board" button */}
+          <div style={{ height: 1, background: 'rgba(0,0,0,0.06)', margin: '4px 8px' }} />
+          <button
+            onClick={() => {
+              if (currentContextId) addActorBoard(currentContextId, 'New Actor');
+              setActorDropdownOpen(false);
+              setActorDropdownPos(null);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              width: 'calc(100% - 16px)',
+              padding: '8px 12px',
+              border: '1px dashed rgba(0,0,0,0.15)',
+              borderRadius: 6,
+              margin: '4px 8px',
+              background: 'transparent',
+              textAlign: 'left',
+              fontSize: 12,
+              color: '#94a3b8',
+              fontWeight: 500,
+              cursor: 'pointer',
+              transition: 'all 150ms ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = '#3b82f6';
+              e.currentTarget.style.color = '#3b82f6';
+              e.currentTarget.style.background = 'rgba(59,130,246,0.06)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'rgba(0,0,0,0.15)';
+              e.currentTarget.style.color = '#94a3b8';
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            + New Actor Board
+          </button>
+          <div style={{ height: 4 }} />
+        </div>
+      )}
 
       {/* Context menu for path tab right-click */}
       {contextMenu.open && (

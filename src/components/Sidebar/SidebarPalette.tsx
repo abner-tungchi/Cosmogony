@@ -155,6 +155,8 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
   // ── Homepage sidebar ────────────────────────────────────────────────────────
   if (currentView === 'home') {
     // ── helpers ──
+    const contextBoards = project.boards.filter((b) => !b.parentContextId);
+
     const getHealth = (board: typeof project.boards[0]): 'green' | 'yellow' | 'red' => {
       if (board.notes.length === 0 && board.bundles.length === 0) return 'red';
       if (board.links.length === 0) return 'yellow';
@@ -168,13 +170,13 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     };
 
     const worstHealth = (): 'green' | 'yellow' | 'red' => {
-      const healths = project.boards.map(getHealth);
+      const healths = contextBoards.map(getHealth);
       if (healths.includes('red'))    return 'red';
       if (healths.includes('yellow')) return 'yellow';
       return 'green';
     };
 
-    // Notes type distribution across all boards
+    // Notes type distribution across all boards (include actor sub-boards in totals)
     const noteTypeCounts: Partial<Record<ElementType, number>> = {};
     for (const board of project.boards) {
       for (const note of board.notes) {
@@ -183,8 +185,8 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     }
     const totalNotes   = Object.values(noteTypeCounts).reduce((s, n) => s + n, 0);
     const totalBundles = project.boards.reduce((s, b) => s + b.bundles.length, 0);
-    const avgBundles   = project.boards.length > 0
-      ? (totalBundles / project.boards.length).toFixed(1)
+    const avgBundles   = contextBoards.length > 0
+      ? (totalBundles / contextBoards.length).toFixed(1)
       : '0';
 
     // Top types for bar + legend (sorted by count desc)
@@ -207,7 +209,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
       const dot = HEALTH_DOT[worstHealth()];
       return (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', paddingTop: 8, gap: 4 }}>
-          <div title={`${project.boards.length} contexts`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊡</div>
+          <div title={`${contextBoards.length} contexts`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊡</div>
           <div title={dot.title} style={{ width: 10, height: 10, borderRadius: '50%', background: dot.color, margin: '2px auto' }} />
           <div title={`${totalNotes} notes`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>📝</div>
           <div title={`${totalBundles} bundles`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊞</div>
@@ -227,7 +229,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
         {/* ── Contexts ── */}
         {sectionLabel('Contexts')}
 
-        {project.boards.map((board) => {
+        {contextBoards.map((board) => {
           const h = getHealth(board);
           const dot = HEALTH_DOT[h];
           return (
@@ -380,7 +382,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
       {/* Remodel special button */}
       <button
         onClick={() => handleToolClick('Remodel')}
-        title="Remodel (4-in-1)"
+        title="Read Model"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -399,7 +401,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
         }}
       >
         <span style={{ fontSize: 16 }}>⊟</span>
-        {!collapsed && <span style={{ fontWeight: 600 }}>Remodel (4-in-1)</span>}
+        {!collapsed && <span style={{ fontWeight: 600 }}>Read Model</span>}
       </button>
 
       {/* All element types — exclude ReadModel (replaced by Remodel 4-in-1) */}

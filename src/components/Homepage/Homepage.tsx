@@ -10,6 +10,8 @@ export const Homepage: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  const contextBoards = project.boards.filter((b) => !b.parentContextId);
+
   const handleOpen = (id: string) => {
     openBoard(id);
     setCurrentView('board');
@@ -66,7 +68,7 @@ export const Homepage: React.FC = () => {
           {project.name}
         </h1>
         <div style={{ fontSize: 13, color: '#64748b', marginTop: 6 }}>
-          {project.boards.length} context{project.boards.length !== 1 ? 's' : ''}
+          {contextBoards.length} context{contextBoards.length !== 1 ? 's' : ''}
         </div>
       </div>
 
@@ -78,8 +80,8 @@ export const Homepage: React.FC = () => {
           gap: 20,
         }}
       >
-        {/* Existing context cards */}
-        {project.boards.map((board) => {
+        {/* Existing context cards — only show top-level context boards */}
+        {contextBoards.map((board) => {
           const isOpen = project.openBoardIds.includes(board.id);
           const isDeleting = confirmDeleteId === board.id;
           return (
@@ -181,7 +183,7 @@ export const Homepage: React.FC = () => {
                 </button>
                 <button
                   onClick={(e) => { e.stopPropagation(); handleDelete(board.id); }}
-                  disabled={project.boards.length <= 1}
+                  disabled={contextBoards.length <= 1}
                   title={isDeleting ? 'Click again to confirm delete' : 'Delete context'}
                   style={{
                     padding: '8px 14px',
@@ -190,8 +192,8 @@ export const Homepage: React.FC = () => {
                     border: 'none',
                     borderRadius: 8,
                     fontSize: 13,
-                    cursor: project.boards.length <= 1 ? 'not-allowed' : 'pointer',
-                    opacity: project.boards.length <= 1 ? 0.4 : 1,
+                    cursor: contextBoards.length <= 1 ? 'not-allowed' : 'pointer',
+                    opacity: contextBoards.length <= 1 ? 0.4 : 1,
                     transition: 'background 0.15s, color 0.15s',
                     fontWeight: 600,
                   }}
