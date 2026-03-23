@@ -78,7 +78,7 @@ export function exportToMarkdown(board: Board): string {
       lines.push(`- **Aggregate**: ${remodel.aggregateNote.label || '—'}${remodel.aggregateNote.content ? ' — ' + remodel.aggregateNote.content : ''}`);
       lines.push(`- **Parameters**: ${remodel.parameterNote.label || '—'}${remodel.parameterNote.content ? ' — ' + remodel.parameterNote.content : ''}`);
       lines.push(`- **Query**: ${remodel.queryNote.label || '—'}${remodel.queryNote.content ? ' — ' + remodel.queryNote.content : ''}`);
-      lines.push(`- **Source Events**: ${remodel.sourceEventNote.label || '—'}${remodel.sourceEventNote.content ? ' — ' + remodel.sourceEventNote.content : ''}`);
+      lines.push(`- **Return Type**: ${remodel.returnTypeNote.label || '—'}${remodel.returnTypeNote.content ? ' — ' + remodel.returnTypeNote.content : ''}`);
       if (remodel.linkedBundleIds.length > 0) {
         const linkedBundleLabels = remodel.linkedBundleIds
           .map((id) => {

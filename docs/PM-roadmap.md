@@ -955,6 +955,768 @@ Remodel 的 CRUD 操作和現有的 Bundle/Note 操作一致，透過 SSE 推播
 4. `es_get_board` 回傳包含 `remodels` 和 `_isUniverse` computed 欄位
 5. AI 可以用 MCP 工具完成完整的 Remodel 建構流程（建立 → 連結 Bundle → 更新內容）
 
+### Phase 6 — Remodel 進階功能：資料模型修訂 + Source Events + Dto（Must Have）
+
+> 產出時間：2026-03-22
+> 背景：Phase 5 完成了 Remodel 基礎功能。Phase 6 針對 Remodel 進行三項增強：(1) 右下格從 Source Events 描述改為 Return Type，並用綠色系區分輸入/輸出；(2) Source Events 改為卡片下方的可收合附屬區域，內容自動從 linked Bundles 的 eventNote 生成；(3) 新增 Dto StickyNote 類型，描述 Remodel 回傳型別中的物件結構。
+
+| 任務 ID | 標題 | 負責 Agent | 依賴 | 狀態 |
+|---------|------|-----------|------|------|
+| FE-012 | Remodel 資料模型修訂（returnTypeNote + linkedDtoIds + 收合狀態） | frontend-engineer | FE-009 | ✅ 完成 |
+| FE-013 | Remodel 視覺更新（配色 + 收合功能） | frontend-engineer | FE-012 | 待開發 |
+| FE-014 | Source Events 附屬區域 | frontend-engineer | FE-012 | 待開發 |
+| FE-015 | Dto StickyNote 元素 + Remodel 連動 | frontend-engineer | FE-012 | 待開發 |
+
+---
+
+### FE-012：Remodel 資料模型修訂（returnTypeNote + linkedDtoIds + 收合狀態）
+
+**依賴**：FE-009（Remodel 基礎功能已完成）
+**負責**：frontend-engineer
+**目的**：調整 Remodel 的資料模型以支援 Phase 6 的三項增強。此任務只做資料層變更和 migration，不涉及 UI 渲染變更。
+
+#### 1. Remodel interface 修改 — `src/types/elements.ts`
+
+```typescript
+export interface Remodel {
+  id: string;
+  position: { x: number; y: number };
+
+  // 四格便條紙
+  aggregateNote: BundleSubNote;      // 上方：Aggregate（讀取視角）
+  parameterNote: BundleSubNote;      // 左下：輸入參數
+  queryNote: BundleSubNote;          // 中下：Query 名稱（Get+名稱）
+  returnTypeNote: BundleSubNote;     // 右下：回傳型別（原 sourceEventNote，重命名）
+
+  // 連動
+  linkedBundleIds: string[];         // 連結到哪些 Bundle
+  linkedDtoIds: string[];            // 新增：連結到哪些 Dto StickyNote
+
+  // 收合狀態
+  collapsed?: boolean;               // 已有欄位，四格卡片本體收合
+  sourceEventsExpanded?: boolean;    // 新增：Source Events 區域展開狀態（預設 true）
+
+  // 元資料（不變）
+  zIndex: number;
+  paths?: string[];
+  phase?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+**變更摘要：**
+- `sourceEventNote` → `returnTypeNote`（重命名）
+- 新增 `linkedDtoIds: string[]`
+- 新增 `sourceEventsExpanded?: boolean`
+
+#### 2. ElementType 擴充 — `src/types/elements.ts`
+
+```typescript
+export type ElementType =
+  | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
+  | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot'
+  | 'Diamond' | 'Dto';   // ← 新增 'Dto'
+```
+
+#### 3. boardStore persist migration v6 → v7
+
+**檔案**：`src/store/boardStore.ts`
+
+persist version 改為 `7`。migrate function 新增 `if (version < 7)` 區塊：
+
+```typescript
+if (version < 7) {
+  // v6 → v7: Remodel 欄位重命名 + 新增欄位
+  const state = persistedState as { project: Project };
+  for (const board of state.project.boards) {
+    if (!board.remodels) board.remodels = [];
+    for (const remodel of board.remodels) {
+      // 重命名 sourceEventNote → returnTypeNote
+      if ('sourceEventNote' in remodel && !('returnTypeNote' in remodel)) {
+        (remodel as any).returnTypeNote = (remodel as any).sourceEventNote;
+        delete (remodel as any).sourceEventNote;
+      }
+      // 補 linkedDtoIds
+      if (!remodel.linkedDtoIds) {
+        remodel.linkedDtoIds = [];
+      }
+      // sourceEventsExpanded 是 optional，不需要補（undefined 等同 true）
+    }
+  }
+}
+```
+
+**邊界情況：**
+- 沒有 Remodel 的 board：`board.remodels = []`，迴圈不執行，安全
+- 已經有 `returnTypeNote`（不會發生，但 defensive）：`'sourceEventNote' in remodel` 為 false，跳過
+- `sourceEventNote` 的 label/content 內容保留不變，只是搬到新欄位
+
+#### 4. boardStore actions 更新
+
+`addRemodel` 的預設值需反映新結構：
+
+- 新建 Remodel 時，`linkedDtoIds` 預設 `[]`
+- `sourceEventsExpanded` 不設預設值（undefined = true by convention）
+- 所有 `sourceEventNote` 引用改為 `returnTypeNote`
+
+新增一個 action（或擴充現有 `updateRemodel`）：
+
+```typescript
+// 不需要新 action——updateRemodel 的 Partial<Remodel> 已經支援
+// 更新 linkedDtoIds: updateRemodel(id, { linkedDtoIds: [...] })
+// 更新 sourceEventsExpanded: updateRemodel(id, { sourceEventsExpanded: false })
+```
+
+#### 5. MCP server 同步更新
+
+**檔案**：`mcp-server/src/index.ts`
+
+**5-1. Remodel interface 同步**
+
+MCP server 的 Remodel 型別定義同步更新（`sourceEventNote` → `returnTypeNote`、加 `linkedDtoIds`、加 `sourceEventsExpanded`）。
+
+**5-2. `es_add_remodel` 參數修改**
+
+```
+移除:
+  - sourceEventLabel
+  - sourceEventContent
+
+新增:
+  - returnTypeLabel (string, required): Return type name
+  - returnTypeContent (string, optional): Return type description
+  - linkedDtoIds (string[], optional): IDs of Dto StickyNotes (default: [])
+```
+
+**5-3. `es_update_remodel` 參數修改**
+
+```
+移除:
+  - sourceEventLabel
+  - sourceEventContent
+
+新增:
+  - returnTypeLabel (string, optional)
+  - returnTypeContent (string, optional)
+  - linkedDtoIds (string[], optional): 完整替換
+  - sourceEventsExpanded (boolean, optional)
+```
+
+**5-4. `es_get_board` 回傳更新**
+
+Remodel 物件中的欄位名稱自動跟著更新。新增 computed 欄位：
+
+```
+_sourceEvents: string[]   // 從 linkedBundleIds 解析出的 event 名稱列表
+                          // 即 linkedBundleIds.map(id => findBundle(id).eventNote.label).filter(Boolean)
+```
+
+**5-5. project.json 載入容錯**
+
+載入時若 Remodel 有 `sourceEventNote` 但無 `returnTypeNote`，自動轉換（與前端 migration 邏輯一致）。
+
+#### 6. isUniverseRemodel helper 無需修改
+
+`isUniverseRemodel` 只讀 `linkedBundleIds` 和 `bundle.infoNote.label`，與此次變更無關。
+
+#### 7. Detail Panel 引用修正
+
+**檔案**：`src/components/DetailPanel/DetailPanel.tsx`
+
+FE-010 已實作的 Remodel Detail Panel 中，所有 `sourceEventNote` 引用改為 `returnTypeNote`。
+
+具體位置：
+- InlineField 的 label 從 "SOURCE EVENTS" 改為 "RETURN TYPE"
+- placeholder 從 "Which events compose this read model..." 改為 "Return type description..."
+- `updateRemodel(id, { sourceEventNote: ... })` 改為 `updateRemodel(id, { returnTypeNote: ... })`
+
+#### 驗收標準
+
+1. `src/types/elements.ts` 中 Remodel interface 有 `returnTypeNote`、`linkedDtoIds`、`sourceEventsExpanded` 欄位，無 `sourceEventNote`
+2. `ElementType` 包含 `'Dto'`
+3. persist migration v6→v7 正確執行：舊 Remodel 的 `sourceEventNote` 被遷移到 `returnTypeNote`，`linkedDtoIds` 補 `[]`
+4. MCP server 的 `es_add_remodel` / `es_update_remodel` 使用 `returnTypeLabel`/`returnTypeContent`
+5. MCP server 的 `es_get_board` Remodel 物件包含 `_sourceEvents` computed 欄位
+6. Detail Panel 中 Remodel 的第四格標題顯示 "RETURN TYPE"
+7. TypeScript 編譯零錯誤（所有 `sourceEventNote` 引用已更新）
+
+---
+
+### FE-013：Remodel 視覺更新（配色 + 收合功能）
+
+**依賴**：FE-012
+**負責**：frontend-engineer
+**目的**：更新 Remodel 四格卡片的配色以區分輸入/輸出參數，並實作 Remodel 收合功能。
+
+#### 1. 配色更新
+
+**檔案**：`src/components/Remodel/Remodel.tsx`
+
+更新 SubNote 渲染時的 `bgColor` 參數：
+
+| 格子位置 | 語意 | 原配色（FE-009） | 新配色 | 文字色 |
+|---------|------|----------------|--------|--------|
+| 上方 | Aggregate | 淺紫 `#e9d5ff` | **不變** `#e9d5ff` | `#1e293b` |
+| 左下 | Parameter（輸入） | 淡青 `#cffafe` | **深綠** `#86efac` | `#1e293b` |
+| 中下 | Query Name | 灰藍 `#bfdbfe` | **不變** `#bfdbfe` | `#1e293b` |
+| 右下 | Return Type（輸出） | 薰衣草 `#ede9fe` | **淺綠** `#bbf7d0` | `#1e293b` |
+
+**設計意圖：**
+- 左下（深綠 `#86efac`）= 輸入參數，右下（淺綠 `#bbf7d0`）= 回傳型別
+- 深淺綠色的配對讓使用者一眼看出「輸入」和「輸出」是同一維度的不同方向
+- 上方（紫）和中下（藍）保持不變，提供足夠的視覺錨點
+
+**欄位對應更新（SubNote 渲染）：**
+
+右下格的 SubNote 現在讀 `remodel.returnTypeNote`（原 `sourceEventNote`）。
+
+#### 2. 收合功能
+
+與 Bundle 的收合機制完全對稱，參考 `src/components/Bundle/Bundle.tsx` 的 collapsed view 實作。
+
+**2-1. 收合狀態**
+
+使用 `remodel.collapsed` 欄位（已在 Remodel interface 中定義為 `collapsed?: boolean`）。
+
+**2-2. 收合後的視覺呈現**
+
+收合後的 Remodel 是一個小卡片，尺寸與 Bundle collapsed 相同：
+
+```
+寬: COLLAPSED_BUNDLE_W (200px)
+高: COLLAPSED_BUNDLE_H (64px)
+```
+
+卡片內容（由上到下）：
+
+```
+┌──────────────────────────────────────┐
+│  Order              (aggregateNote)  │  ← 10px, opacity 0.75, 單行 ellipsis
+│  GetOrderList       (queryNote)      │  ← 12px, bold, 單行 ellipsis，主標題
+│                              [▼]     │  ← 展開按鈕
+└──────────────────────────────────────┘
+```
+
+- **背景色**：`#a78bfa`（紫色，與 Remodel 冷色調一致）
+- **文字色**：`white`
+- **副標題**（第一行）：`remodel.aggregateNote.label`，10px，opacity 0.75
+  - 如果 label 為空，不渲染此行
+- **主標題**（第二行）：`remodel.queryNote.label`，12px，bold
+  - 如果 label 為空，顯示 placeholder "Query Name"
+- **展開按鈕**：position absolute, right 6px, vertically centered
+  - 與 Bundle collapsed 的展開按鈕樣式一致
+  - 背景: `rgba(255,255,255,0.25)`
+  - 文字: "▼"
+  - 點擊: `updateRemodel(remodel.id, { collapsed: false })`
+- **刪除按鈕**：與 Bundle 一致，右上角紅色圓形 ×
+- **PathDots**：與 Bundle collapsed 一致
+
+**2-3. 展開狀態的收合按鈕**
+
+在 Remodel 展開視圖（四格卡片）的左上角（與 Bundle 一致的位置），新增收合按鈕：
+
+```
+樣式: 與 Bundle 的 BTN_STYLE 一致
+  position: absolute, left: -8, top: -8
+  width: 20, height: 20, border-radius: 50%
+  背景: #a78bfa（紫色，區別 Bundle 的橘色 #FF8C00）
+  文字: "▲"
+  點擊: updateRemodel(remodel.id, { collapsed: true })
+```
+
+**2-4. Universe badge 在收合狀態**
+
+收合狀態下不顯示 Universe badge（空間不夠，且收合的目的就是省空間）。
+
+**2-5. linkUtils 更新**
+
+**檔案**：`src/utils/linkUtils.ts`
+
+`getBundleBounds` 或同等計算函式需支援 Remodel 的 collapsed 狀態。如果 Remodel 的連線錨點計算複用了 Bundle 的尺寸邏輯，需確認 collapsed Remodel 使用 `COLLAPSED_BUNDLE_W` / `COLLAPSED_BUNDLE_H`。
+
+新增（或擴充）：
+
+```typescript
+export function getRemodelBounds(remodel: Remodel) {
+  const w = remodel.collapsed ? COLLAPSED_BUNDLE_W : BUNDLE_W;
+  const h = remodel.collapsed ? COLLAPSED_BUNDLE_H : BUNDLE_H;
+  return {
+    left: remodel.position.x,
+    top: remodel.position.y,
+    right: remodel.position.x + w,
+    bottom: remodel.position.y + h,
+    cx: remodel.position.x + w / 2,
+    cy: remodel.position.y + h / 2,
+  };
+}
+```
+
+**2-6. Minimap 更新**
+
+Minimap 中 Remodel 的尺寸需反映 collapsed 狀態。
+
+**2-7. collapseAll / expandAll 擴充**
+
+boardStore 中現有的 `collapseAllBundles` / `expandAllBundles` actions 應該同步操作 Remodel：
+
+```typescript
+collapseAllBundles: () => set(produce((state) => {
+  const board = activeBoard(state);
+  board.bundles.forEach(b => { b.collapsed = true; });
+  board.remodels.forEach(r => { r.collapsed = true; });  // ← 新增
+  board.updatedAt = new Date().toISOString();
+})),
+
+expandAllBundles: () => set(produce((state) => {
+  const board = activeBoard(state);
+  board.bundles.forEach(b => { b.collapsed = false; });
+  board.remodels.forEach(r => { r.collapsed = false; });  // ← 新增
+  board.updatedAt = new Date().toISOString();
+})),
+```
+
+或者，考慮重新命名這些 actions 為 `collapseAll` / `expandAll`（同時操作 Bundle 和 Remodel）。但為了避免影響現有呼叫端，建議保持原名並擴充行為。
+
+#### 驗收標準
+
+1. Remodel 左下格（Parameter）為深綠 `#86efac`，右下格（Return Type）為淺綠 `#bbf7d0`
+2. 右下格內容來自 `returnTypeNote`（非舊的 sourceEventNote）
+3. Remodel 展開時左上角有紫色收合按鈕（▲），點擊後收合
+4. 收合後顯示 200x64 紫色卡片，主標題為 queryNote.label，副標題為 aggregateNote.label
+5. 收合後有展開按鈕（▼）和刪除按鈕（×）
+6. collapseAll / expandAll 同時操作 Bundle 和 Remodel
+7. Minimap 正確反映 Remodel 的 collapsed 尺寸
+8. Link 連線錨點正確計算 collapsed Remodel 的位置
+
+---
+
+### FE-014：Source Events 附屬區域
+
+**依賴**：FE-012
+**負責**：frontend-engineer
+**目的**：在 Remodel 卡片下方顯示一個可收合的 Source Events 區域，內容自動從 linked Bundles 的 eventNote 生成。
+
+#### 1. Source Events 的資料來源
+
+**純 computed，不存資料。** Source Events 列表完全由以下邏輯即時生成：
+
+```typescript
+const sourceEvents = remodel.linkedBundleIds
+  .map(bundleId => {
+    const bundle = activeBoard.bundles.find(b => b.id === bundleId);
+    if (!bundle) return null;
+    return {
+      bundleId: bundle.id,
+      eventLabel: bundle.eventNote.label,
+      aggregateLabel: bundle.infoNote.label,
+    };
+  })
+  .filter(Boolean);
+```
+
+**即時反映變更**：如果使用者修改了某個 Bundle 的 `eventNote.label`，Source Events 區域會自動更新（因為是 computed，每次 render 重算）。
+
+#### 2. UI 結構
+
+Source Events 區域渲染在 Remodel 四格卡片的**正下方**，作為同一個 DOM 節點的子元素（不是獨立定位的畫布元素）。
+
+**2-1. 展開狀態**
+
+當 `remodel.sourceEventsExpanded !== false`（預設 true，undefined 也算 true）：
+
+```
+┌──────────────────────────────────────────────────┐
+│  Remodel 4-in-1 卡片（496 x 248）               │
+│  ┌─Aggregate─┐                                   │
+│  ├Parameter┤├Query┤├ReturnType┤                   │
+└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐  ← Source Events 區域
+│  SOURCE EVENTS (3)                     [▲ 收合]  │
+│  ┌──────────────────────────────────────────┐    │
+│  │  ⚡ OrderCreated         (Order)         │    │
+│  ├──────────────────────────────────────────┤    │
+│  │  ⚡ PaymentReceived      (Payment)       │    │
+│  ├──────────────────────────────────────────┤    │
+│  │  ⚡ ShippingInitiated    (Shipping)      │    │
+│  └──────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────┘
+```
+
+**Source Events 區域樣式：**
+
+```
+容器:
+  position: absolute
+  top: BUNDLE_H + 4 （四格卡片高度 + 4px 間距）
+  left: 0
+  width: BUNDLE_W （與四格卡片等寬，496px）
+  background: rgba(124, 58, 237, 0.06)（極淡紫色背景）
+  border: 1px solid rgba(124, 58, 237, 0.15)
+  border-radius: 6px
+  padding: 8px
+
+標題列:
+  display: flex, justify-content: space-between, align-items: center
+  "SOURCE EVENTS (N)": font-size 10px, font-weight 700, uppercase, letter-spacing 0.08em, color #64748b
+  收合按鈕: background transparent, border none, color #94a3b8, font-size 12px, cursor pointer, "▲"
+
+Event 列表:
+  margin-top: 6px
+  每個 event item:
+    display: flex, align-items: center, gap: 6px
+    padding: 4px 8px
+    border-radius: 4px
+    background: rgba(255,255,255,0.04)
+    margin-bottom: 2px
+
+    左側 icon: "⚡" (font-size 11px)
+    Event 名稱: font-size 12px, color #e2e8f0, font-weight 500
+    Aggregate 來源: font-size 10px, color #94a3b8, margin-left auto, "(Order)" 格式
+```
+
+**2-2. 收合狀態**
+
+當 `remodel.sourceEventsExpanded === false`：
+
+```
+┌──────────────────────────────────────────────────┐
+│  Remodel 4-in-1 卡片                             │
+└──────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────┐
+│  3 Source Events                        [▼ 展開] │
+└──────────────────────────────────────────────────┘
+```
+
+收合後的 Source Events 區域：
+
+```
+容器:
+  同展開狀態的容器樣式，但 padding 減少為 6px 8px
+  高度固定（不展開 event 列表）
+
+內容:
+  單行: "{N} Source Events"
+  font-size: 11px, color: #94a3b8
+  展開按鈕: "▼"（替換 "▲"）
+```
+
+**2-3. 空狀態**
+
+當 `remodel.linkedBundleIds.length === 0` 時，Source Events 區域仍然顯示，但內容為：
+
+```
+┌──────────────────────────────────────────────────┐
+│  SOURCE EVENTS                                   │
+│  No linked bundles.                              │
+│  Use Link Mode or Detail Panel to add bundles.   │
+└──────────────────────────────────────────────────┘
+```
+
+- 文字色: `#64748b`，font-size 11px，font-style italic
+- 不顯示收合按鈕（沒東西可以收合）
+
+**2-4. Deleted Bundle 容錯**
+
+如果 `linkedBundleIds` 中某個 ID 在 `activeBoard.bundles` 中找不到（Bundle 已被刪除），該 event item 顯示為：
+
+```
+  ⚡ (Deleted Bundle)          灰色斜體, opacity 0.5
+```
+
+不自動移除——使用者需要在 Detail Panel 手動清理（FE-010 已有此功能）。
+
+#### 3. 收合按鈕互動
+
+**點擊收合**：`updateRemodel(remodel.id, { sourceEventsExpanded: false })`
+**點擊展開**：`updateRemodel(remodel.id, { sourceEventsExpanded: true })`
+
+收合/展開動畫：可選。如果要做，用 CSS `max-height` transition（200ms ease）。不做也可以，Phase 6 不強制。
+
+#### 4. 與 Remodel 收合的互動
+
+**當 Remodel 本體收合（collapsed = true）時，Source Events 區域完全不渲染。**
+
+邏輯：
+
+```typescript
+// 在 Remodel 元件中
+if (remodel.collapsed) {
+  return <CollapsedRemodelView ... />;  // 不含 Source Events
+}
+
+return (
+  <div>
+    <ExpandedRemodelView ... />         {/* 四格卡片 */}
+    <SourceEventsPanel ... />           {/* Source Events 區域 */}
+  </div>
+);
+```
+
+#### 5. Remodel 整體高度計算影響
+
+Source Events 區域改變了 Remodel 的「有效高度」。這影響：
+
+**5-1. Minimap**
+
+Minimap 渲染 Remodel 時，如果 Source Events 展開，Remodel 的有效高度 = `BUNDLE_H + 4 + sourceEventsHeight`。但 Minimap 是概略渲染（色點），**不需要精確反映 Source Events 區域**。Minimap 仍使用四格卡片的尺寸即可。
+
+**5-2. Fit All**
+
+`fitAll` 計算 bounding box 時，同樣**只計算四格卡片的尺寸**，不含 Source Events。原因：Source Events 是附屬資訊，不應該影響使用者的「全部可見」預期。
+
+**5-3. Link 連線錨點**
+
+Link 的連線起終點基於四格卡片的 bounds，**不含 Source Events 區域**。Source Events 不是 Link 的可連接目標。
+
+**5-4. 拖動**
+
+拖動 Remodel 時，Source Events 區域跟著移動（因為是同一個 DOM 容器的子元素）。
+
+**5-5. Path 篩選 dim**
+
+Remodel 被 dim 時（activePath 不匹配），Source Events 區域一起被 dim（繼承父容器的 opacity）。
+
+#### 驗收標準
+
+1. Remodel 展開時，下方顯示 Source Events 區域，列出所有 linked Bundles 的 eventNote.label
+2. 修改某個 linked Bundle 的 eventNote.label 後，Source Events 區域即時更新
+3. 點擊收合按鈕後，Source Events 區域收合為「N Source Events ▼」摘要行
+4. 點擊展開按鈕後，恢復完整 event 列表
+5. linkedBundleIds 為空時顯示空狀態提示
+6. 已刪除的 Bundle 顯示為 "(Deleted Bundle)" 灰色斜體
+7. Remodel 本體收合時，Source Events 區域不渲染
+8. 拖動 Remodel 時，Source Events 區域跟著移動
+9. Path 篩選 dim 效果覆蓋 Source Events 區域
+
+---
+
+### FE-015：Dto StickyNote 元素 + Remodel 連動
+
+**依賴**：FE-012
+**負責**：frontend-engineer
+**目的**：新增 Dto（Data Transfer Object）StickyNote 類型，用於描述 Remodel 回傳型別中的物件結構（例如 `OrderItem` 的欄位定義）。Dto 卡片可以與 Remodel 建立關聯。
+
+#### 1. Dto 的使用場景
+
+當一個 Remodel 的回傳型別是物件陣列時（例如 `OrderItem[]`），使用者需要一個地方描述那個物件的結構。Dto 卡片就是這個用途——一張大卡片，寫明物件名稱和欄位。
+
+例如：
+- Remodel "GetOrderList" 的回傳型別是 `Order[]`
+- 使用者建立一張 Dto 卡片 "Order"，內容寫：`orderId: string / customerName: string / totalAmount: number / status: OrderStatus`
+- 這張 Dto 卡片與 Remodel 建立關聯
+
+#### 2. Dto StickyNote 的視覺樣式
+
+Dto 使用現有的 StickyNote 元件，但有特定的配色和較大的預設尺寸。
+
+**2-1. 在 ELEMENT_CONFIGS 中新增 Dto 配置**
+
+**檔案**：`src/constants/elementTypes.ts`
+
+```typescript
+Dto: {
+  label: 'Dto',
+  color: '#4ade80',   // 綠色（與 Remodel 的 Parameter/ReturnType 綠色系一致）
+}
+```
+
+在 `ELEMENT_TYPE_LIST` 中加入 `'Dto'`。
+
+在 `SidebarPalette.tsx` 的 `iconMap` 中新增：
+
+```typescript
+Dto: '{ }',   // 用大括號符號，表示物件結構
+```
+
+**2-2. Dto 的預設尺寸**
+
+```
+width: 200（比一般 StickyNote 的 160 更寬）
+height: 160（比一般 StickyNote 的 80 更高）
+```
+
+這個尺寸在 Board.tsx 的 `handleCanvasMouseDown` 中設定（與其他 StickyNote 類型的 size 設定在同一處）。
+
+判斷條件：
+
+```typescript
+const noteWidth = type === 'Dto' ? 200 : 160;
+const noteHeight = type === 'Dto' ? 160 : 80;
+```
+
+**2-3. Dto 卡片的內容格式**
+
+Dto 的 `label` 欄位用於物件名稱（例如 "OrderItem"）。
+Dto 的 `notes` 欄位用於物件結構描述（multiline 文字）。
+
+StickyNote 元件渲染 Dto 時：
+- 上半部：label（粗體，作為物件名稱）
+- 下半部：notes 內容（smaller font，monospace 風格，適合欄位列表）
+
+建議的 notes 格式（純文字，使用者自行維護）：
+
+```
+orderId: string
+customerName: string
+totalAmount: number
+items: OrderItem[]
+status: OrderStatus
+```
+
+**不做結構化解析**——notes 就是自由文字。AI 可以透過 MCP 自動產生格式化的內容。
+
+**2-4. Dto 的 StickyNote 渲染特化**
+
+**檔案**：`src/components/StickyNote/StickyNote.tsx`
+
+在 StickyNote 元件中，當 `note.type === 'Dto'` 時，渲染樣式做以下調整：
+
+```
+背景色: #4ade80（與 ELEMENT_CONFIGS.Dto.color 一致）
+文字色: #1e293b（深色，配合淺綠背景）
+
+上半部（label）:
+  font-size: 13px, font-weight: 700
+  border-bottom: 1px solid rgba(0,0,0,0.1)
+  padding-bottom: 4px
+  margin-bottom: 4px
+
+下半部（notes 內容）:
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace
+  font-size: 10px
+  line-height: 1.5
+  white-space: pre-wrap
+  overflow-y: auto（超過卡片高度時可捲動）
+  color: rgba(0,0,0,0.7)
+```
+
+如果 notes 為空，顯示 placeholder："Double-click to add fields"（淺色斜體）。
+
+#### 3. Sidebar 新增 Dto 放置按鈕
+
+**檔案**：`src/components/Sidebar/SidebarPalette.tsx`
+
+Dto 按鈕自動出現在 ELEMENT_TYPE_LIST 的 map 渲染中（因為第 2 步已加入 `ELEMENT_TYPE_LIST`）。
+
+放置順序建議：Dto 排在 ReadModel 的位置（因為 ReadModel 已被移除），或排在列表最後。
+
+#### 4. Remodel Detail Panel — Linked Dtos 管理
+
+**檔案**：`src/components/DetailPanel/DetailPanel.tsx`
+
+在 Remodel 的 Detail Panel 中（FE-010 實作），新增一個 "LINKED DTOS" 區塊，放在 "LINKED BUNDLES" 區塊下方。
+
+**結構與行為完全對稱於 Linked Bundles 區塊。**
+
+**4-1. 已連結的 Dto 列表**
+
+遍歷 `remodel.linkedDtoIds`，對每個 ID 從 `activeBoard.notes` 找到 `type === 'Dto'` 的 StickyNote，顯示為 chip：
+
+```
+樣式: 與 Linked Bundles chip 一致
+  左側文字: dto.label || "(Unnamed Dto)"
+  左側 icon: "{ }"（小字，10px）
+  右側: × 按鈕（刪除連結）
+```
+
+點擊 × 按鈕：
+
+```typescript
+updateRemodel(remodel.id, {
+  linkedDtoIds: remodel.linkedDtoIds.filter(id => id !== dtoId)
+});
+```
+
+**4-2. 新增連結的下拉選單**
+
+「+ Add Dto」按鈕，點擊後展開下拉選單：
+- 列出 `activeBoard.notes.filter(n => n.type === 'Dto')` 中**尚未被連結**的 Dto
+- 排除已在 `linkedDtoIds` 中的
+- 每個選項顯示 Dto 的 label
+- 選中後：
+
+```typescript
+updateRemodel(remodel.id, {
+  linkedDtoIds: [...remodel.linkedDtoIds, selectedDtoId]
+});
+```
+
+- 下拉選單樣式與 Linked Bundles 的下拉選單一致
+
+**4-3. Deleted Dto 容錯**
+
+與 Linked Bundles 一致：如果 `linkedDtoIds` 中某個 ID 找不到對應的 Dto StickyNote，顯示為 "(Deleted Dto)" 灰色斜體。
+
+#### 5. Link Mode — Remodel ↔ Dto 自動連動
+
+**檔案**：`src/components/Board/Board.tsx`
+
+擴充 FE-010 實作的 `handleLinkTarget` 邏輯。
+
+在 Remodel ↔ Bundle 的自動連動之後，新增 Remodel ↔ Dto 的判斷：
+
+```typescript
+// 特殊處理：Remodel ↔ Dto 自動連動 linkedDtoIds
+let remodelIdForDto: string | null = null;
+let dtoNoteId: string | null = null;
+
+if (linkFromType === 'remodel' && targetType === 'note') {
+  const targetNote = activeBoard.notes.find(n => n.id === targetId);
+  if (targetNote?.type === 'Dto') {
+    remodelIdForDto = linkFromId;
+    dtoNoteId = targetId;
+  }
+} else if (linkFromType === 'note' && targetType === 'remodel') {
+  const fromNote = activeBoard.notes.find(n => n.id === linkFromId);
+  if (fromNote?.type === 'Dto') {
+    remodelIdForDto = targetId;
+    dtoNoteId = linkFromId;
+  }
+}
+
+if (remodelIdForDto && dtoNoteId) {
+  const remodel = activeBoard.remodels.find(r => r.id === remodelIdForDto);
+  if (remodel && !remodel.linkedDtoIds.includes(dtoNoteId)) {
+    updateRemodel(remodelIdForDto, {
+      linkedDtoIds: [...remodel.linkedDtoIds, dtoNoteId],
+    });
+  }
+}
+```
+
+**注意**：這段邏輯與 Remodel ↔ Bundle 連動是**並列**的（不是互斥）。一次 Link 操作只會觸發其中一個（因為 target 不可能同時是 Bundle 和 Dto）。
+
+**反向清理規則**：與 Linked Bundles 一致——刪除 Link 不自動從 `linkedDtoIds` 移除。
+
+#### 6. MCP 工具支援
+
+**6-1. 現有 `es_add_note` 已支援**
+
+`es_add_note` 的 `type` 參數接受 `ElementType`，加入 `'Dto'` 後自動支援。
+
+AI 可以這樣建立 Dto：
+
+```
+es_add_note(type="Dto", label="OrderItem", notes="orderId: string\ncustomerName: string\ntotalAmount: number")
+```
+
+**6-2. `es_update_remodel` 已支援 `linkedDtoIds`**
+
+FE-012 已將 `linkedDtoIds` 加入 `es_update_remodel` 參數。
+
+#### 驗收標準
+
+1. Sidebar 出現 Dto 放置按鈕，可在畫布上新增 Dto 卡片
+2. Dto 卡片背景為綠色（`#4ade80`），label 粗體顯示在上方，notes 以 monospace 字體顯示在下方
+3. Dto 預設尺寸為 200x160（大於一般 StickyNote）
+4. Remodel Detail Panel 出現 "LINKED DTOS" 區塊，可新增/刪除 Dto 連結
+5. Link Mode 從 Remodel 拉線到 Dto StickyNote 時，自動加入 `linkedDtoIds`
+6. 已刪除的 Dto 在 Detail Panel 顯示為 "(Deleted Dto)"
+7. AI 可透過 `es_add_note(type="Dto", ...)` 建立 Dto 卡片
+8. AI 可透過 `es_update_remodel(linkedDtoIds=[...])` 管理 Dto 連結
+
 ---
 
 ## 依賴關係圖
@@ -974,8 +1736,15 @@ BE-001 (完成)
   FE-008 (完成)
 
 Phase 5（Remodel & Actor）：
-  FE-009（獨立，無依賴）
-    └── FE-010（依賴 FE-009）
-    └── BE-003（依賴 FE-009 資料模型）
-  FE-011（獨立，與 FE-009 平行）
+  FE-009（獨立，無依賴）── 完成
+    └── FE-010（依賴 FE-009）── 完成
+    └── BE-003（依賴 FE-009 資料模型）── 完成
+  FE-011（獨立，與 FE-009 平行）── 完成
+
+Phase 6（Remodel 進階）：
+  FE-012（依賴 FE-009，資料模型修訂）
+    ├── FE-013（依賴 FE-012，配色 + 收合）
+    ├── FE-014（依賴 FE-012，Source Events 區域）
+    └── FE-015（依賴 FE-012，Dto 元素 + 連動）
+  FE-013 / FE-014 / FE-015 三者互相獨立，可平行開發
 ```

@@ -174,8 +174,9 @@ export const Board: React.FC = () => {
           aggregateNote: { label: '', content: '' },
           parameterNote: { label: '', content: '' },
           queryNote: { label: '', content: '' },
-          sourceEventNote: { label: '', content: '' },
+          returnTypeNote: { label: '', content: '' },
           linkedBundleIds: [],
+          linkedDtoIds: [],
           zIndex: 10 + activeBoard.remodels.length + activeBoard.bundles.length,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -579,7 +580,7 @@ export const Board: React.FC = () => {
               <SubCard bgColor="#e9d5ff" label={activeRemodel.aggregateNote.label}    left={SUB_W + GAP}       top={0} />
               <SubCard bgColor="#cffafe" label={activeRemodel.parameterNote.label}    left={0}                 top={SUB_H + GAP} />
               <SubCard bgColor="#bfdbfe" label={activeRemodel.queryNote.label}        left={SUB_W + GAP}       top={SUB_H + GAP} />
-              <SubCard bgColor="#ede9fe" label={activeRemodel.sourceEventNote.label}  left={(SUB_W + GAP) * 2} top={SUB_H + GAP} />
+              <SubCard bgColor="#ede9fe" label={activeRemodel.returnTypeNote.label}   left={(SUB_W + GAP) * 2} top={SUB_H + GAP} />
             </div>
           );
         })()}

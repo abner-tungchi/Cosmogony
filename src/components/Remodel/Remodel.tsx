@@ -225,7 +225,7 @@ export const Remodel: React.FC<Props> = ({
   const REMODEL_W = SUB_W * 3 + GAP * 2;
   const REMODEL_H = SUB_H * 2 + GAP;
 
-  const saveSub = (key: keyof Pick<RemodelType, 'aggregateNote' | 'parameterNote' | 'queryNote' | 'sourceEventNote'>) =>
+  const saveSub = (key: keyof Pick<RemodelType, 'aggregateNote' | 'parameterNote' | 'queryNote' | 'returnTypeNote'>) =>
     (label: string, content: string) => {
       updateRemodel(remodel.id, { [key]: { label, content } as BundleSubNote });
     };
@@ -274,15 +274,15 @@ export const Remodel: React.FC<Props> = ({
         zoom={zoom}
       />
 
-      {/* Source Event (lavender) — bottom right */}
+      {/* Return Type (lavender) — bottom right */}
       <SubNote
-        label={remodel.sourceEventNote.label}
-        content={remodel.sourceEventNote.content}
+        label={remodel.returnTypeNote.label}
+        content={remodel.returnTypeNote.content}
         bgColor={COLORS.sourceEvent}
         textColor={COLORS.text}
         offsetX={EVENT_X}
         offsetY={EVENT_Y}
-        onSave={saveSub('sourceEventNote')}
+        onSave={saveSub('returnTypeNote')}
         zoom={zoom}
       />
 

@@ -334,7 +334,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 6,
+      version: 7,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -439,6 +439,30 @@ export const useBoardStore = create<BoardStore>()(
             for (const board of s.project.boards) {
               const b = board as Board & { remodels?: Remodel[] };
               if (!b.remodels) b.remodels = [];
+            }
+          }
+          // fall through to v7 migration
+        }
+
+        if (version < 7) {
+          // v6 → v7: rename sourceEventNote → returnTypeNote, add linkedDtoIds, add sourceEventsExpanded
+          const s = persistedState as { project?: Project };
+          if (s.project) {
+            for (const board of s.project.boards) {
+              if (!board.remodels) board.remodels = [];
+              for (const remodel of board.remodels) {
+                // Rename sourceEventNote → returnTypeNote (preserve content)
+                const r = remodel as unknown as Record<string, unknown>;
+                if ('sourceEventNote' in r && !('returnTypeNote' in r)) {
+                  r['returnTypeNote'] = r['sourceEventNote'];
+                  delete r['sourceEventNote'];
+                }
+                // Add linkedDtoIds if missing
+                if (!remodel.linkedDtoIds) {
+                  remodel.linkedDtoIds = [];
+                }
+                // sourceEventsExpanded is optional — undefined === true by convention, no need to set
+              }
             }
           }
           return persistedState as BoardStore;

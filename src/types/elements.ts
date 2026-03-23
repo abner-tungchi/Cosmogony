@@ -1,7 +1,7 @@
 export type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
   | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot'
-  | 'Diamond';
+  | 'Diamond' | 'Dto';
 
 export interface Policy {
   rule: string;
@@ -73,14 +73,18 @@ export interface Remodel {
   aggregateNote: BundleSubNote;     // top: Aggregate (read perspective)
   parameterNote: BundleSubNote;     // bottom-left: Query parameters
   queryNote: BundleSubNote;         // bottom-center: Query name
-  sourceEventNote: BundleSubNote;   // bottom-right: Event Source description
+  returnTypeNote: BundleSubNote;    // bottom-right: Return type description (renamed from sourceEventNote)
 
-  // Bundle linkage
-  linkedBundleIds: string[];
+  // Linkage
+  linkedBundleIds: string[];        // linked Bundle IDs
+  linkedDtoIds: string[];           // linked Dto StickyNote IDs
+
+  // Collapse state
+  collapsed?: boolean;              // main card collapse state
+  sourceEventsExpanded?: boolean;   // Source Events area expanded (default true by convention)
 
   // Metadata (consistent with Bundle)
   zIndex: number;
-  collapsed?: boolean;
   paths?: string[];
   phase?: string;
   notes?: string;

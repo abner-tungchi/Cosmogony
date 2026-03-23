@@ -81,17 +81,21 @@ interface Remodel {
   position: { x: number; y: number };
 
   // Four sub-notes (reusing BundleSubNote, different semantics)
-  aggregateNote: BundleSubNote;   // top: Aggregate (read perspective)
-  parameterNote: BundleSubNote;   // bottom-left: Query parameters
-  queryNote: BundleSubNote;       // bottom-center: Query name
-  sourceEventNote: BundleSubNote; // bottom-right: Event Source description
+  aggregateNote: BundleSubNote;    // top: Aggregate (read perspective)
+  parameterNote: BundleSubNote;    // bottom-left: Query parameters
+  queryNote: BundleSubNote;        // bottom-center: Query name
+  returnTypeNote: BundleSubNote;   // bottom-right: Return type description (renamed from sourceEventNote)
 
-  // Bundle linkage
-  linkedBundleIds: string[];
+  // Linkage
+  linkedBundleIds: string[];       // linked Bundle IDs
+  linkedDtoIds: string[];          // linked Dto StickyNote IDs
+
+  // Collapse state
+  collapsed?: boolean;
+  sourceEventsExpanded?: boolean;
 
   // Metadata (consistent with Bundle)
   zIndex: number;
-  collapsed?: boolean;
   paths?: string[];
   phase?: string;
   notes?: string;
@@ -163,6 +167,13 @@ function migrateProject(p: Project): Project {
     for (const remodel of board.remodels) {
       if (!remodel.paths) remodel.paths = [];
       if (!remodel.linkedBundleIds) remodel.linkedBundleIds = [];
+      if (!remodel.linkedDtoIds) remodel.linkedDtoIds = [];
+      // Migrate sourceEventNote → returnTypeNote
+      const r = remodel as unknown as Record<string, unknown>;
+      if ('sourceEventNote' in r && !('returnTypeNote' in r)) {
+        r['returnTypeNote'] = r['sourceEventNote'];
+        delete r['sourceEventNote'];
+      }
     }
   }
   return p;
@@ -482,6 +493,9 @@ server.tool(
       remodels: board.remodels.map((r) => ({
         ...r,
         _isUniverse: isUniverseRemodel(r, board.bundles),
+        _sourceEvents: r.linkedBundleIds
+          .map((id) => board.bundles.find((b) => b.id === id)?.eventNote.label ?? '')
+          .filter((label) => label.length > 0),
       })),
     };
     return {
@@ -776,7 +790,7 @@ Layout:
   • Purple (top): Aggregate (read perspective)
   • Cyan (bottom-left): Query Parameters
   • Blue-grey (bottom-center): Query name (convention: "Get" + name, e.g. "GetOrderList")
-  • Lavender (bottom-right): Event Source description
+  • Lavender (bottom-right): Return type description
   • Remodel size: 496×248px; omit x/y for auto-layout (appended right of existing elements at y=520)`,
   {
     aggregateLabel: z.string().describe('Aggregate name for read perspective (top cell)'),
@@ -785,16 +799,17 @@ Layout:
     parameterContent: z.string().optional().describe('Parameter details'),
     queryLabel: z.string().describe('Query name — convention: "Get" + name, e.g. "GetOrderList" (bottom-center cell)'),
     queryContent: z.string().optional().describe('Query description'),
-    sourceEventLabel: z.string().describe('Event source summary (bottom-right cell)'),
-    sourceEventContent: z.string().optional().describe('Detailed event source description'),
+    returnTypeLabel: z.string().describe('Return type name (bottom-right cell)'),
+    returnTypeContent: z.string().optional().describe('Return type description'),
     linkedBundleIds: z.array(z.string()).optional().describe('IDs of Bundles whose domain events feed this Read Model (default: [])'),
+    linkedDtoIds: z.array(z.string()).optional().describe('IDs of Dto StickyNotes associated with this Remodel (default: [])'),
     x: z.number().optional().describe('X position (omit for auto-layout)'),
     y: z.number().optional().describe('Y position (omit for auto-layout, defaults to 520)'),
     paths: z.array(z.string()).optional().describe('FlowPath IDs this remodel belongs to'),
     phase: z.string().optional().describe('Phase or stage label'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, sourceEventLabel, sourceEventContent, linkedBundleIds, x, y, paths, phase, notes }) => {
+  async ({ aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedBundleIds, linkedDtoIds, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const posX = x ?? nextRemodelX();
@@ -806,8 +821,9 @@ Layout:
       aggregateNote: { label: aggregateLabel, content: aggregateContent ?? '' },
       parameterNote: { label: parameterLabel, content: parameterContent ?? '' },
       queryNote: { label: queryLabel, content: queryContent ?? '' },
-      sourceEventNote: { label: sourceEventLabel, content: sourceEventContent ?? '' },
+      returnTypeNote: { label: returnTypeLabel, content: returnTypeContent ?? '' },
       linkedBundleIds: linkedBundleIds ?? [],
+      linkedDtoIds: linkedDtoIds ?? [],
       zIndex: board.remodels.length + board.bundles.length + 1,
       paths: paths ?? [],
       phase,
@@ -841,16 +857,18 @@ server.tool(
     parameterContent: z.string().optional().describe('Parameter details'),
     queryLabel: z.string().optional().describe('Query name (bottom-center cell)'),
     queryContent: z.string().optional().describe('Query description'),
-    sourceEventLabel: z.string().optional().describe('Event source summary (bottom-right cell)'),
-    sourceEventContent: z.string().optional().describe('Detailed event source description'),
+    returnTypeLabel: z.string().optional().describe('Return type name (bottom-right cell)'),
+    returnTypeContent: z.string().optional().describe('Return type description'),
     linkedBundleIds: z.array(z.string()).optional().describe('Complete replacement of linked bundle IDs (not append)'),
+    linkedDtoIds: z.array(z.string()).optional().describe('Complete replacement of linked Dto StickyNote IDs (not append)'),
+    sourceEventsExpanded: z.boolean().optional().describe('Source Events area expanded state'),
     x: z.number().optional().describe('New X position'),
     y: z.number().optional().describe('New Y position'),
     paths: z.array(z.string()).optional().describe('FlowPath IDs this remodel belongs to'),
     phase: z.string().optional().describe('Phase or stage label'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ id, aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, sourceEventLabel, sourceEventContent, linkedBundleIds, x, y, paths, phase, notes }) => {
+  async ({ id, aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedBundleIds, linkedDtoIds, sourceEventsExpanded, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const remodel = board.remodels.find((r) => r.id === id);
@@ -865,9 +883,11 @@ server.tool(
     if (parameterContent !== undefined) remodel.parameterNote.content = parameterContent;
     if (queryLabel !== undefined) remodel.queryNote.label = queryLabel;
     if (queryContent !== undefined) remodel.queryNote.content = queryContent;
-    if (sourceEventLabel !== undefined) remodel.sourceEventNote.label = sourceEventLabel;
-    if (sourceEventContent !== undefined) remodel.sourceEventNote.content = sourceEventContent;
+    if (returnTypeLabel !== undefined) remodel.returnTypeNote.label = returnTypeLabel;
+    if (returnTypeContent !== undefined) remodel.returnTypeNote.content = returnTypeContent;
     if (linkedBundleIds !== undefined) remodel.linkedBundleIds = linkedBundleIds;
+    if (linkedDtoIds !== undefined) remodel.linkedDtoIds = linkedDtoIds;
+    if (sourceEventsExpanded !== undefined) remodel.sourceEventsExpanded = sourceEventsExpanded;
     if (paths !== undefined) remodel.paths = paths;
     if (phase !== undefined) remodel.phase = phase;
     if (notes !== undefined) remodel.notes = notes;

@@ -702,8 +702,8 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
   const [parameterContent, setParameterContent] = useState(remodel.parameterNote.content);
   const [queryLabel, setQueryLabel] = useState(remodel.queryNote.label);
   const [queryContent, setQueryContent] = useState(remodel.queryNote.content);
-  const [sourceEventLabel, setSourceEventLabel] = useState(remodel.sourceEventNote.label);
-  const [sourceEventContent, setSourceEventContent] = useState(remodel.sourceEventNote.content);
+  const [returnTypeLabel, setReturnTypeLabel] = useState(remodel.returnTypeNote.label);
+  const [returnTypeContent, setReturnTypeContent] = useState(remodel.returnTypeNote.content);
   const [phase, setPhase] = useState(remodel.phase ?? '');
   const [notes, setNotes] = useState(remodel.notes ?? '');
 
@@ -720,8 +720,8 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     setParameterContent(remodel.parameterNote.content);
     setQueryLabel(remodel.queryNote.label);
     setQueryContent(remodel.queryNote.content);
-    setSourceEventLabel(remodel.sourceEventNote.label);
-    setSourceEventContent(remodel.sourceEventNote.content);
+    setReturnTypeLabel(remodel.returnTypeNote.label);
+    setReturnTypeContent(remodel.returnTypeNote.content);
     setPhase(remodel.phase ?? '');
     setNotes(remodel.notes ?? '');
     setShowBundleDropdown(false);
@@ -752,9 +752,9 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     updateRemodel(remodel.id, { queryNote: { label: queryLabel, content: queryContent } });
   }, [remodel.id, queryLabel, queryContent, updateRemodel]);
 
-  const saveSourceEventNote = useCallback(() => {
-    updateRemodel(remodel.id, { sourceEventNote: { label: sourceEventLabel, content: sourceEventContent } });
-  }, [remodel.id, sourceEventLabel, sourceEventContent, updateRemodel]);
+  const saveReturnTypeNote = useCallback(() => {
+    updateRemodel(remodel.id, { returnTypeNote: { label: returnTypeLabel, content: returnTypeContent } });
+  }, [remodel.id, returnTypeLabel, returnTypeContent, updateRemodel]);
 
   const saveMeta = useCallback(() => {
     updateRemodel(remodel.id, { phase });
@@ -884,22 +884,22 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
         />
       </div>
 
-      {/* SOURCE EVENTS section */}
+      {/* RETURN TYPE section */}
       <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Source Events</SectionLabel>
+        <SectionLabel>Return Type</SectionLabel>
         <InlineField
-          label="Event sources"
-          value={sourceEventLabel}
-          placeholder="Event sources"
-          onChange={setSourceEventLabel}
-          onBlur={saveSourceEventNote}
+          label="Return type name"
+          value={returnTypeLabel}
+          placeholder="Return type name"
+          onChange={setReturnTypeLabel}
+          onBlur={saveReturnTypeNote}
         />
         <InlineField
           label="Details"
-          value={sourceEventContent}
-          placeholder="Which events compose this read model..."
-          onChange={setSourceEventContent}
-          onBlur={saveSourceEventNote}
+          value={returnTypeContent}
+          placeholder="Return type description..."
+          onChange={setReturnTypeContent}
+          onBlur={saveReturnTypeNote}
           multiline
         />
       </div>
