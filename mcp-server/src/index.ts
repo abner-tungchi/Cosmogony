@@ -12,12 +12,7 @@ import { fileURLToPath } from 'url';
 
 type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
-  | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot' | 'Diamond';
-
-interface Policy {
-  rule: string;
-  severity: 'block' | 'warn';
-}
+  | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot' | 'Diamond' | 'Dto';
 
 interface FlowPath {
   id: string;
@@ -25,6 +20,11 @@ interface FlowPath {
   color: string;
   description?: string;
   actorId?: string;
+}
+
+interface Property {
+  attrName: string;
+  type: string;
 }
 
 interface StickyNote {
@@ -39,6 +39,11 @@ interface StickyNote {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  // DomainEvent-centric fields
+  information?: Property[];       // Command's input parameters
+  eventProperties?: Property[];   // DomainEvent's output properties
+  commandId?: string;             // DomainEvent links to its triggering Command
+  entityId?: string;              // DomainEvent links to its Aggregate
 }
 
 interface BundleSubNote {
@@ -46,32 +51,12 @@ interface BundleSubNote {
   content: string;
 }
 
-interface Bundle {
-  id: string;
-  position: { x: number; y: number };
-  infoNote: BundleSubNote;
-  entityNote: BundleSubNote;
-  commandNote: BundleSubNote;
-  eventNote: BundleSubNote;
-  zIndex: number;
-  collapsed?: boolean;
-  policies?: Policy[];
-  paths?: string[];
-  phase?: string;
-  trigger?: string;
-  uiDescription?: string;
-  readModels?: string[];
-  notes?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 interface Link {
   id: string;
   fromId: string;
   toId: string;
-  fromType: 'note' | 'bundle' | 'remodel';
-  toType: 'note' | 'bundle' | 'remodel';
+  fromType: 'note' | 'remodel';
+  toType: 'note' | 'remodel';
   label?: string;
   createdAt: string;
 }
@@ -79,26 +64,19 @@ interface Link {
 interface Remodel {
   id: string;
   position: { x: number; y: number };
-
-  // Four sub-notes (reusing BundleSubNote, different semantics)
-  aggregateNote: BundleSubNote;    // top: Aggregate (read perspective)
-  parameterNote: BundleSubNote;    // bottom-left: Query parameters
-  queryNote: BundleSubNote;        // bottom-center: Query name
-  returnTypeNote: BundleSubNote;   // bottom-right: Return type description (renamed from sourceEventNote)
-
-  // Linkage
-  linkedBundleIds: string[];       // linked Bundle IDs
-  linkedDtoIds: string[];          // linked Dto StickyNote IDs
-
-  // Collapse state
+  aggregateNote: BundleSubNote;
+  parameterNote: BundleSubNote;
+  queryNote: BundleSubNote;
+  returnTypeNote: BundleSubNote;
+  linkedBundleIds: string[];   // semantically: linked DomainEvent note IDs post-migration
+  linkedDtoIds: string[];
   collapsed?: boolean;
   sourceEventsExpanded?: boolean;
-
-  // Metadata (consistent with Bundle)
   zIndex: number;
   paths?: string[];
   phase?: string;
   notes?: string;
+  linkedActorId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,8 +84,8 @@ interface Remodel {
 interface Board {
   id: string;
   name: string;
+  parentContextId?: string;
   notes: StickyNote[];
-  bundles: Bundle[];
   remodels: Remodel[];
   links: Link[];
   flowPaths: FlowPath[];
@@ -137,12 +115,12 @@ function saveProject(): void {
 
 // ─── In-memory project state ───────────────────────────────────────────────
 
-function createBoard(name: string): Board {
+function createBoard(name: string, parentContextId?: string): Board {
   return {
     id: uuidv4(),
     name,
+    parentContextId,
     notes: [],
-    bundles: [],
     remodels: [],
     links: [],
     flowPaths: [],
@@ -151,16 +129,109 @@ function createBoard(name: string): Board {
   };
 }
 
-/** Migrate loaded project.json to ensure all new optional fields exist. */
+/**
+ * Migrate loaded project.json to ensure all fields are up to date.
+ * Also handles v8→v9 migration: convert legacy bundles to Command+DomainEvent notes.
+ */
 function migrateProject(p: Project): Project {
+  const now = new Date().toISOString();
+
   for (const board of p.boards) {
-    const b = board as Board & { flowPaths?: FlowPath[]; remodels?: Remodel[] };
+    const b = board as Board & { bundles?: unknown[]; flowPaths?: FlowPath[]; remodels?: Remodel[] };
     if (!b.flowPaths) b.flowPaths = [];
     if (!b.remodels) b.remodels = [];
-    for (const bundle of board.bundles) {
-      if (!bundle.paths) bundle.paths = [];
-      if (!bundle.policies) bundle.policies = [];
+
+    // v8→v9: Migrate bundles to Command+DomainEvent notes
+    if (b.bundles && b.bundles.length > 0) {
+      const bundleToEventNoteId = new Map<string, string>();
+
+      for (const raw of b.bundles) {
+        const bundle = raw as {
+          id: string;
+          position: { x: number; y: number };
+          commandNote: BundleSubNote;
+          eventNote: BundleSubNote;
+          entityNote: BundleSubNote;
+          infoNote: BundleSubNote;
+          zIndex: number;
+          paths?: string[];
+          phase?: string;
+          notes?: string;
+        };
+
+        const commandNoteId = uuidv4();
+        const eventNoteId = uuidv4();
+
+        const commandNote: StickyNote = {
+          id: commandNoteId,
+          type: 'Command',
+          label: bundle.commandNote.label || 'Command',
+          position: { x: bundle.position.x + 168, y: bundle.position.y + 128 },
+          size: { width: 160, height: 80 },
+          zIndex: bundle.zIndex,
+          paths: bundle.paths ?? [],
+          phase: bundle.phase,
+          notes: bundle.notes,
+          information: bundle.entityNote.content
+            ? bundle.entityNote.content.split(',').map((s: string) => ({
+                attrName: s.trim(),
+                type: 'String',
+              })).filter((p: Property) => p.attrName.length > 0)
+            : [],
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        const eventNote: StickyNote = {
+          id: eventNoteId,
+          type: 'DomainEvent',
+          label: bundle.eventNote.label || 'DomainEvent',
+          position: { x: bundle.position.x + 328, y: bundle.position.y + 128 },
+          size: { width: 160, height: 80 },
+          zIndex: bundle.zIndex,
+          paths: bundle.paths ?? [],
+          phase: bundle.phase,
+          notes: bundle.notes,
+          commandId: commandNoteId,
+          entityId: undefined,
+          eventProperties: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+
+        board.notes.push(commandNote);
+        board.notes.push(eventNote);
+        bundleToEventNoteId.set(bundle.id, eventNoteId);
+
+        // Command → DomainEvent link
+        board.links.push({
+          id: uuidv4(),
+          fromId: commandNoteId,
+          toId: eventNoteId,
+          fromType: 'note',
+          toType: 'note',
+          createdAt: now,
+        });
+      }
+
+      // Migrate existing links that referenced bundles
+      board.links = board.links.map((link) => {
+        const l = link as Link & { fromType: string; toType: string };
+        const migrated: Link = { ...link };
+        if ((l.fromType as string) === 'bundle') {
+          migrated.fromType = 'note';
+          migrated.fromId = bundleToEventNoteId.get(link.fromId) ?? link.fromId;
+        }
+        if ((l.toType as string) === 'bundle') {
+          migrated.toType = 'note';
+          migrated.toId = bundleToEventNoteId.get(link.toId) ?? link.toId;
+        }
+        return migrated;
+      });
+
+      delete b.bundles;
     }
+
     for (const note of board.notes) {
       if (!note.paths) note.paths = [];
     }
@@ -168,7 +239,6 @@ function migrateProject(p: Project): Project {
       if (!remodel.paths) remodel.paths = [];
       if (!remodel.linkedBundleIds) remodel.linkedBundleIds = [];
       if (!remodel.linkedDtoIds) remodel.linkedDtoIds = [];
-      // Migrate sourceEventNote → returnTypeNote
       const r = remodel as unknown as Record<string, unknown>;
       if ('sourceEventNote' in r && !('returnTypeNote' in r)) {
         r['returnTypeNote'] = r['sourceEventNote'];
@@ -201,37 +271,24 @@ function getActiveBoard(): Board {
   return projectState.boards.find((b) => b.id === projectState.activeBoardId) ?? projectState.boards[0];
 }
 
-/** Returns the next auto-layout X for a new bundle: rightmost existing bundle X + 736, or 80 if none. */
-function nextBundleX(): number {
+/** Returns the next auto-layout X for a new note cluster: rightmost existing note X + 400, or 80 if none. */
+function nextEventX(): number {
   const board = getActiveBoard();
-  if (board.bundles.length === 0) return 80;
-  const maxX = Math.max(...board.bundles.map((b) => b.position.x));
-  return maxX + 736;
+  const eventNotes = board.notes.filter((n) => n.type === 'DomainEvent');
+  if (eventNotes.length === 0) return 80;
+  const maxX = Math.max(...eventNotes.map((n) => n.position.x));
+  return maxX + 400;
 }
 
-/** Returns the next auto-layout X for a new remodel: rightmost existing bundle/remodel X + 736, or 80 if none. */
+/** Returns the next auto-layout X for a new remodel: rightmost existing note/remodel X + 400, or 80 if none. */
 function nextRemodelX(): number {
   const board = getActiveBoard();
-  const allElements = [
-    ...board.bundles.map((b) => b.position.x),
+  const allX = [
+    ...board.notes.map((n) => n.position.x),
     ...board.remodels.map((r) => r.position.x),
   ];
-  if (allElements.length === 0) return 80;
-  return Math.max(...allElements) + 736;
-}
-
-/**
- * Compute whether a Remodel spans more than one Aggregate Root.
- * Rule: linkedBundleIds -> Bundle.infoNote.label; if > 1 unique non-empty label -> Universe.
- */
-function isUniverseRemodel(remodel: Remodel, bundles: Bundle[]): boolean {
-  const linked = bundles.filter((b) => remodel.linkedBundleIds.includes(b.id));
-  const uniqueAggregates = new Set(
-    linked
-      .map((b) => b.infoNote.label.trim().toLowerCase())
-      .filter((label) => label.length > 0),
-  );
-  return uniqueAggregates.size > 1;
+  if (allX.length === 0) return 80;
+  return Math.max(...allX) + 400;
 }
 
 // ─── SSE subscribers ───────────────────────────────────────────────────────
@@ -356,7 +413,7 @@ if (FORCE_RELAY) {
 
 const server = new McpServer({
   name: 'event-storming',
-  version: '2.1.0',
+  version: '3.0.0',
 });
 
 // ─── Context (Board) management tools ──────────────────────────────────────
@@ -378,7 +435,7 @@ server.tool(
 
 server.tool(
   'es_get_project',
-  'Return a summary of the entire project: name, project ID, and all contexts with note/bundle counts. Use this first to get a global overview before drilling into a specific context.',
+  'Return a summary of the entire project: name, project ID, and all contexts with note/event counts. Use this first to get a global overview before drilling into a specific context.',
   {},
   async () => {
     await loadProjectFromRelay();
@@ -391,7 +448,8 @@ server.tool(
         name: b.name,
         isActive: b.id === projectState.activeBoardId,
         noteCount: b.notes.length,
-        bundleCount: b.bundles.length,
+        domainEventCount: b.notes.filter((n) => n.type === 'DomainEvent').length,
+        commandCount: b.notes.filter((n) => n.type === 'Command').length,
         remodelCount: b.remodels.length,
         linkCount: b.links.length,
         flowPathCount: b.flowPaths.length,
@@ -483,21 +541,25 @@ server.tool(
 
 server.tool(
   'es_get_board',
-  'Return the active Bounded Context board JSON (includes remodels with computed _isUniverse field). Use this before incremental edits to read current state.',
+  `Return the active Bounded Context board JSON. Includes all notes (with DomainEvent-centric fields), remodels, links, and flowPaths.
+Each DomainEvent note includes: commandId (linked Command note ID), entityId (linked Aggregate note ID), eventProperties (output schema), information (inherited from Command).
+Use this before incremental edits to read current state.`,
   {},
   async () => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
-    const boardWithComputed = {
-      ...board,
-      remodels: board.remodels.map((r) => ({
-        ...r,
-        _isUniverse: isUniverseRemodel(r, board.bundles),
-        _sourceEvents: r.linkedBundleIds
-          .map((id) => board.bundles.find((b) => b.id === id)?.eventNote.label ?? '')
-          .filter((label) => label.length > 0),
-      })),
-    };
+    // Annotate each DomainEvent note with resolved labels for readability
+    const notesWithComputed = board.notes.map((n) => {
+      if (n.type !== 'DomainEvent') return n;
+      const commandNote = n.commandId ? board.notes.find((c) => c.id === n.commandId) : undefined;
+      const entityNote = n.entityId ? board.notes.find((e) => e.id === n.entityId) : undefined;
+      return {
+        ...n,
+        _commandLabel: commandNote?.label ?? null,
+        _entityLabel: entityNote?.label ?? null,
+      };
+    });
+    const boardWithComputed = { ...board, notes: notesWithComputed };
     return {
       content: [{ type: 'text' as const, text: JSON.stringify(boardWithComputed, null, 2) }],
     };
@@ -512,7 +574,6 @@ server.tool(
     await loadProjectFromRelay();
     const board = getActiveBoard();
     board.notes = [];
-    board.bundles = [];
     board.remodels = [];
     board.links = [];
     board.updatedAt = new Date().toISOString();
@@ -547,10 +608,11 @@ server.tool(
 Layout guide:
   • Canvas origin (0,0) top-left; X→right, Y→down
   • StickyNote default size: 160×80px; horizontal spacing: 240px
-  • Suggested Y layers: Actor/Policy→0, main flow→200, ReadModel→400
-  • Types: DomainEvent | Command | Aggregate | Policy | ExternalSystem | Actor | ReadModel | Hotspot | Diamond`,
+  • Suggested Y layers: Actor/Policy→0, Command→200, DomainEvent→200, Aggregate→80
+  • Types: DomainEvent | Command | Aggregate | Policy | ExternalSystem | Actor | ReadModel | Hotspot | Diamond | Dto
+Note: Prefer es_add_command_for_event to create Command+DomainEvent pairs atomically.`,
   {
-    type: z.enum(['DomainEvent', 'Command', 'Aggregate', 'Policy', 'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond']).describe('Element type'),
+    type: z.enum(['DomainEvent', 'Command', 'Aggregate', 'Policy', 'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto']).describe('Element type'),
     label: z.string().describe('Text label for the note'),
     x: z.number().describe('X position in canvas coordinates'),
     y: z.number().describe('Y position in canvas coordinates'),
@@ -636,147 +698,293 @@ server.tool(
   }
 );
 
-// ─── Bundle tools ───────────────────────────────────────────────────────────
+// ─── DomainEvent-centric tools ──────────────────────────────────────────────
 
 server.tool(
-  'es_add_bundle',
-  `Add a 4-in-1 Bundle (Entity/AR + Params + Command + Event) to the active Bounded Context. Returns { id }.
-Layout:
-  • Yellow (top-center): Entity → becomes Aggregate Root
-  • Green (bottom-left): Command Parameters (inputs required by the Command)
-  • Blue (bottom-center): Command
-  • Orange (bottom-right): Domain Event
-  • Bundle size: 496×248px; horizontal spacing: 240px between bundles
-  • Omit x/y to use auto-layout: appends right of the last bundle at y=200`,
+  'es_add_command_for_event',
+  `Create a Command note and link it to an existing DomainEvent note as its trigger.
+The Command is placed to the left of the DomainEvent on the canvas.
+Also creates a directional link: Command → DomainEvent.
+Returns { commandId, linkId }.
+
+Use this to build the Command→Event flow step by step:
+1. Create DomainEvent notes first (or use es_add_flow)
+2. Call this tool to attach a Command to each event`,
   {
-    x: z.number().optional().describe('X position of the bundle (omit for auto-layout)'),
-    y: z.number().optional().describe('Y position of the bundle (omit for auto-layout, defaults to 200)'),
-    infoLabel: z.string().describe('Label for the Entity/Aggregate Root (yellow, top-center) sub-note'),
-    infoContent: z.string().describe('Content for the Entity sub-note'),
-    entityLabel: z.string().describe('Label for the Command Parameters (green, bottom-left) sub-note'),
-    entityContent: z.string().describe('Content for the Command Parameters sub-note'),
-    commandLabel: z.string().describe('Label for the Command (blue, bottom-center) sub-note'),
-    commandContent: z.string().describe('Content for the Command sub-note'),
-    eventLabel: z.string().describe('Label for the DomainEvent (orange, bottom-right) sub-note'),
-    eventContent: z.string().describe('Content for the DomainEvent sub-note'),
-    policies: z.array(z.object({
-      rule: z.string().describe('Business rule description'),
-      severity: z.enum(['block', 'warn']).describe('block = hard constraint, warn = advisory'),
-    })).optional().describe('Business policies / rules attached to this bundle'),
-    paths: z.array(z.string()).optional().describe('FlowPath IDs this bundle belongs to'),
-    phase: z.string().optional().describe('Phase or stage label (e.g. "Discovery", "Order Processing")'),
-    trigger: z.string().optional().describe('What triggers this command (e.g. "User clicks Submit", "Policy: X")'),
-    uiDescription: z.string().optional().describe('Description of the UI interaction or screen context'),
-    readModels: z.array(z.string()).optional().describe('Read model names that inform this command decision'),
-    notes: z.string().optional().describe('Free-text annotations or remarks'),
+    eventNoteId: z.string().describe('ID of the DomainEvent note to attach the command to'),
+    commandLabel: z.string().describe('Label for the Command note (imperative: e.g. "PlaceOrder", "Submit Payment")'),
+    information: z.array(z.object({
+      attrName: z.string().describe('Parameter attribute name'),
+      type: z.string().describe('Parameter type (e.g. "String", "Integer", "Boolean")'),
+    })).optional().default([]).describe('Input parameters required by this command'),
   },
-  async ({ x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes }) => {
+  async ({ eventNoteId, commandLabel, information }) => {
     await loadProjectFromRelay();
-    const posX = x ?? nextBundleX();
-    const posY = y ?? 200;
+    const board = getActiveBoard();
+    const eventNote = board.notes.find((n) => n.id === eventNoteId);
+    if (!eventNote) {
+      return { content: [{ type: 'text' as const, text: `DomainEvent note ${eventNoteId} not found.` }] };
+    }
+    if (eventNote.type !== 'DomainEvent') {
+      return { content: [{ type: 'text' as const, text: `Note ${eventNoteId} is not a DomainEvent (type: ${eventNote.type}).` }] };
+    }
+
     const now = new Date().toISOString();
-    const bundle: Bundle = {
-      id: uuidv4(),
-      position: { x: posX, y: posY },
-      infoNote: { label: infoLabel, content: infoContent },
-      entityNote: { label: entityLabel, content: entityContent },
-      commandNote: { label: commandLabel, content: commandContent },
-      eventNote: { label: eventLabel, content: eventContent },
-      zIndex: 1,
-      policies: policies ?? [],
-      paths: paths ?? [],
-      phase,
-      trigger,
-      uiDescription,
-      readModels,
-      notes,
+    const commandNoteId = uuidv4();
+
+    const commandNote: StickyNote = {
+      id: commandNoteId,
+      type: 'Command',
+      label: commandLabel,
+      position: {
+        x: eventNote.position.x - 200,
+        y: eventNote.position.y,
+      },
+      size: { width: 160, height: 80 },
+      zIndex: eventNote.zIndex,
+      paths: eventNote.paths ?? [],
+      phase: eventNote.phase,
+      information: information ?? [],
       createdAt: now,
       updatedAt: now,
     };
-    const board = getActiveBoard();
-    board.bundles.push(bundle);
+
+    board.notes.push(commandNote);
+
+    // Update the DomainEvent to reference this Command
+    eventNote.commandId = commandNoteId;
+    eventNote.updatedAt = now;
+
+    // Create directional link Command → DomainEvent
+    const linkId = uuidv4();
+    const link: Link = {
+      id: linkId,
+      fromId: commandNoteId,
+      toId: eventNoteId,
+      fromType: 'note',
+      toType: 'note',
+      createdAt: now,
+    };
+    board.links.push(link);
+
     board.updatedAt = now;
     projectState.updatedAt = now;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('add_bundle', bundle);
-    return { content: [{ type: 'text' as const, text: JSON.stringify({ id: bundle.id }) }] };
+    await broadcast('add_note', commandNote);
+    await broadcast('update_note', { id: eventNoteId, commandId: commandNoteId });
+    await broadcast('add_link', link);
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ commandId: commandNoteId, linkId }),
+      }],
+    };
   }
 );
 
 server.tool(
-  'es_update_bundle',
-  'Update any sub-note labels/contents, position, or metadata of an existing Bundle. All fields except id are optional.',
+  'es_update_command_information',
+  'Update the input parameters (information schema) of a Command note. Replaces all existing parameters.',
   {
-    id: z.string().describe('Bundle ID to update'),
-    x: z.number().optional().describe('New X position'),
-    y: z.number().optional().describe('New Y position'),
-    infoLabel: z.string().optional(),
-    infoContent: z.string().optional(),
-    entityLabel: z.string().optional(),
-    entityContent: z.string().optional(),
-    commandLabel: z.string().optional(),
-    commandContent: z.string().optional(),
-    eventLabel: z.string().optional(),
-    eventContent: z.string().optional(),
-    policies: z.array(z.object({
-      rule: z.string().describe('Business rule description'),
-      severity: z.enum(['block', 'warn']).describe('block = hard constraint, warn = advisory'),
-    })).optional().describe('Replace all policies on this bundle'),
-    paths: z.array(z.string()).optional().describe('FlowPath IDs this bundle belongs to'),
-    phase: z.string().optional().describe('Phase or stage label'),
-    trigger: z.string().optional().describe('What triggers this command'),
-    uiDescription: z.string().optional().describe('Description of the UI interaction or screen context'),
-    readModels: z.array(z.string()).optional().describe('Read model names that inform this command decision'),
-    notes: z.string().optional().describe('Free-text annotations or remarks'),
+    commandId: z.string().describe('ID of the Command note to update'),
+    information: z.array(z.object({
+      attrName: z.string().describe('Parameter attribute name'),
+      type: z.string().describe('Parameter type (e.g. "String", "Integer", "Boolean")'),
+    })).describe('Complete replacement of the command\'s input parameters'),
   },
-  async ({ id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes }) => {
+  async ({ commandId, information }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
-    const bundle = board.bundles.find(b => b.id === id);
-    if (!bundle) return { content: [{ type: 'text' as const, text: `Bundle ${id} not found.` }] };
-    if (x !== undefined) bundle.position.x = x;
-    if (y !== undefined) bundle.position.y = y;
-    if (infoLabel !== undefined) bundle.infoNote.label = infoLabel;
-    if (infoContent !== undefined) bundle.infoNote.content = infoContent;
-    if (entityLabel !== undefined) bundle.entityNote.label = entityLabel;
-    if (entityContent !== undefined) bundle.entityNote.content = entityContent;
-    if (commandLabel !== undefined) bundle.commandNote.label = commandLabel;
-    if (commandContent !== undefined) bundle.commandNote.content = commandContent;
-    if (eventLabel !== undefined) bundle.eventNote.label = eventLabel;
-    if (eventContent !== undefined) bundle.eventNote.content = eventContent;
-    if (policies !== undefined) bundle.policies = policies;
-    if (paths !== undefined) bundle.paths = paths;
-    if (phase !== undefined) bundle.phase = phase;
-    if (trigger !== undefined) bundle.trigger = trigger;
-    if (uiDescription !== undefined) bundle.uiDescription = uiDescription;
-    if (readModels !== undefined) bundle.readModels = readModels;
-    if (notes !== undefined) bundle.notes = notes;
-    bundle.updatedAt = new Date().toISOString();
-    board.updatedAt = bundle.updatedAt;
-    projectState.updatedAt = bundle.updatedAt;
+    const note = board.notes.find((n) => n.id === commandId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${commandId} not found.` }] };
+    if (note.type !== 'Command') return { content: [{ type: 'text' as const, text: `Note ${commandId} is not a Command (type: ${note.type}).` }] };
+    note.information = information;
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_bundle', { id, x, y, infoLabel, infoContent, entityLabel, entityContent, commandLabel, commandContent, eventLabel, eventContent, policies, paths, phase, trigger, uiDescription, readModels, notes });
-    return { content: [{ type: 'text' as const, text: 'Bundle updated.' }] };
+    await broadcast('update_note', { id: commandId, information });
+    return { content: [{ type: 'text' as const, text: 'Command information updated.' }] };
   }
 );
 
 server.tool(
-  'es_delete_bundle',
-  'Delete a Bundle and its associated links.',
-  { id: z.string().describe('Bundle ID to delete') },
-  async ({ id }) => {
+  'es_update_event_properties',
+  'Update the output properties (event schema) of a DomainEvent note. Replaces all existing properties.',
+  {
+    eventId: z.string().describe('ID of the DomainEvent note to update'),
+    eventProperties: z.array(z.object({
+      attrName: z.string().describe('Property attribute name'),
+      type: z.string().describe('Property type (e.g. "String", "Integer", "DateTime")'),
+    })).describe('Complete replacement of the event\'s output properties'),
+  },
+  async ({ eventId, eventProperties }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
-    board.bundles = board.bundles.filter(b => b.id !== id);
-    board.links = board.links.filter(l => l.fromId !== id && l.toId !== id);
-    board.updatedAt = new Date().toISOString();
-    projectState.updatedAt = board.updatedAt;
+    const note = board.notes.find((n) => n.id === eventId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${eventId} not found.` }] };
+    if (note.type !== 'DomainEvent') return { content: [{ type: 'text' as const, text: `Note ${eventId} is not a DomainEvent (type: ${note.type}).` }] };
+    note.eventProperties = eventProperties;
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('delete_bundle', { id });
-    return { content: [{ type: 'text' as const, text: 'Bundle deleted.' }] };
+    await broadcast('update_note', { id: eventId, eventProperties });
+    return { content: [{ type: 'text' as const, text: 'Event properties updated.' }] };
+  }
+);
+
+server.tool(
+  'es_link_entity_to_event',
+  `Link an Aggregate note to a DomainEvent as its entity (the aggregate being acted upon).
+Sets DomainEvent.entityId = aggregateNoteId. Pass aggregateNoteId as empty string "" to unlink.
+Returns { success: true }.`,
+  {
+    eventNoteId: z.string().describe('ID of the DomainEvent note'),
+    aggregateNoteId: z.string().describe('ID of the Aggregate note to link (pass empty string to unlink)'),
+  },
+  async ({ eventNoteId, aggregateNoteId }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const eventNote = board.notes.find((n) => n.id === eventNoteId);
+    if (!eventNote) return { content: [{ type: 'text' as const, text: `DomainEvent note ${eventNoteId} not found.` }] };
+    if (eventNote.type !== 'DomainEvent') return { content: [{ type: 'text' as const, text: `Note ${eventNoteId} is not a DomainEvent.` }] };
+
+    const entityId = aggregateNoteId.trim() === '' ? undefined : aggregateNoteId;
+    eventNote.entityId = entityId;
+    eventNote.updatedAt = new Date().toISOString();
+    board.updatedAt = eventNote.updatedAt;
+    projectState.updatedAt = eventNote.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: eventNoteId, entityId });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
+  }
+);
+
+// ─── Flow (happy path) tool ──────────────────────────────────────────────────
+
+server.tool(
+  'es_add_flow',
+  `Create an entire Event Storming happy path by adding multiple Command→DomainEvent pairs in one call.
+Each step creates: one Command note + one DomainEvent note + a Command→Event link.
+Steps are auto-positioned left-to-right (400px spacing, y=200) starting after any existing events.
+Optionally auto-links consecutive DomainEvents with arrows.
+Returns [{ commandId, eventId, linkId, index }] for each step.
+
+Layout per step (pair of notes, 200px spacing):
+  Command: x=stepX,       y=200, size 160×80, color blue
+  Event:   x=stepX+200,   y=200, size 160×80, color orange
+
+Example: 3 steps → placed at x=80, x=480, x=880 (if board is empty)`,
+  {
+    steps: z.array(z.object({
+      commandLabel: z.string().describe('Command label (imperative: e.g. "PlaceOrder")'),
+      eventLabel: z.string().describe('Domain Event label (past tense: e.g. "OrderPlaced")'),
+      information: z.array(z.object({
+        attrName: z.string(),
+        type: z.string(),
+      })).optional().default([]).describe('Input parameters for the command'),
+      eventProperties: z.array(z.object({
+        attrName: z.string(),
+        type: z.string(),
+      })).optional().default([]).describe('Output properties carried by the domain event'),
+    })).describe('Ordered flow steps, left to right'),
+    autoLink: z.boolean().optional().default(true).describe('Auto-create DomainEvent→next-Command links between consecutive steps'),
+    startX: z.number().optional().describe('Override X start position for the first step (default: auto, appends after existing events)'),
+  },
+  async ({ steps, autoLink, startX }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const now = new Date().toISOString();
+
+    const baseX = startX ?? nextEventX();
+    const STEP_SPACING = 400;
+    const CMD_EVENT_GAP = 200;
+
+    const createdSteps: Array<{ commandId: string; eventId: string; linkId: string; index: number }> = [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const s = steps[i];
+      const stepX = baseX + i * STEP_SPACING;
+
+      const commandId = uuidv4();
+      const eventId = uuidv4();
+      const linkId = uuidv4();
+
+      const commandNote: StickyNote = {
+        id: commandId,
+        type: 'Command',
+        label: s.commandLabel,
+        position: { x: stepX, y: 200 },
+        size: { width: 160, height: 80 },
+        zIndex: 1,
+        paths: [],
+        information: s.information ?? [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const eventNote: StickyNote = {
+        id: eventId,
+        type: 'DomainEvent',
+        label: s.eventLabel,
+        position: { x: stepX + CMD_EVENT_GAP, y: 200 },
+        size: { width: 160, height: 80 },
+        zIndex: 1,
+        paths: [],
+        commandId,
+        eventProperties: s.eventProperties ?? [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      const cmdEventLink: Link = {
+        id: linkId,
+        fromId: commandId,
+        toId: eventId,
+        fromType: 'note',
+        toType: 'note',
+        createdAt: now,
+      };
+
+      board.notes.push(commandNote);
+      board.notes.push(eventNote);
+      board.links.push(cmdEventLink);
+
+      await broadcast('add_note', commandNote);
+      await broadcast('add_note', eventNote);
+      await broadcast('add_link', cmdEventLink);
+
+      createdSteps.push({ commandId, eventId, linkId, index: i });
+    }
+
+    // Auto-link: DomainEvent[i] → Command[i+1]
+    if (autoLink && createdSteps.length > 1) {
+      for (let i = 0; i < createdSteps.length - 1; i++) {
+        const flowLink: Link = {
+          id: uuidv4(),
+          fromId: createdSteps[i].eventId,
+          toId: createdSteps[i + 1].commandId,
+          fromType: 'note',
+          toType: 'note',
+          createdAt: now,
+        };
+        board.links.push(flowLink);
+        await broadcast('add_link', flowLink);
+      }
+    }
+
+    board.updatedAt = now;
+    projectState.updatedAt = now;
+    saveProject();
+    await syncProjectToRelay();
+
+    return { content: [{ type: 'text' as const, text: JSON.stringify(createdSteps, null, 2) }] };
   }
 );
 
@@ -791,7 +999,8 @@ Layout:
   • Cyan (bottom-left): Query Parameters
   • Blue-grey (bottom-center): Query name (convention: "Get" + name, e.g. "GetOrderList")
   • Lavender (bottom-right): Return type description
-  • Remodel size: 496×248px; omit x/y for auto-layout (appended right of existing elements at y=520)`,
+  • Remodel size: 496×248px; omit x/y for auto-layout (appended right of existing elements at y=520)
+  • linkedBundleIds now means linked DomainEvent note IDs (post-migration)`,
   {
     aggregateLabel: z.string().describe('Aggregate name for read perspective (top cell)'),
     aggregateContent: z.string().optional().describe('Aggregate description'),
@@ -801,7 +1010,7 @@ Layout:
     queryContent: z.string().optional().describe('Query description'),
     returnTypeLabel: z.string().describe('Return type name (bottom-right cell)'),
     returnTypeContent: z.string().optional().describe('Return type description'),
-    linkedBundleIds: z.array(z.string()).optional().describe('IDs of Bundles whose domain events feed this Read Model (default: [])'),
+    linkedEventIds: z.array(z.string()).optional().describe('IDs of DomainEvent notes whose events feed this Read Model (stored in linkedBundleIds field)'),
     linkedDtoIds: z.array(z.string()).optional().describe('IDs of Dto StickyNotes associated with this Remodel (default: [])'),
     x: z.number().optional().describe('X position (omit for auto-layout)'),
     y: z.number().optional().describe('Y position (omit for auto-layout, defaults to 520)'),
@@ -809,7 +1018,7 @@ Layout:
     phase: z.string().optional().describe('Phase or stage label'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedBundleIds, linkedDtoIds, x, y, paths, phase, notes }) => {
+  async ({ aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedEventIds, linkedDtoIds, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const posX = x ?? nextRemodelX();
@@ -822,9 +1031,9 @@ Layout:
       parameterNote: { label: parameterLabel, content: parameterContent ?? '' },
       queryNote: { label: queryLabel, content: queryContent ?? '' },
       returnTypeNote: { label: returnTypeLabel, content: returnTypeContent ?? '' },
-      linkedBundleIds: linkedBundleIds ?? [],
+      linkedBundleIds: linkedEventIds ?? [],
       linkedDtoIds: linkedDtoIds ?? [],
-      zIndex: board.remodels.length + board.bundles.length + 1,
+      zIndex: board.remodels.length + board.notes.length + 1,
       paths: paths ?? [],
       phase,
       notes,
@@ -838,17 +1047,14 @@ Layout:
     await syncProjectToRelay();
     await broadcast('add_remodel', remodel);
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({ ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) }, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(remodel, null, 2) }],
     };
   }
 );
 
 server.tool(
   'es_update_remodel',
-  'Update a Remodel\'s content, linked bundles, or metadata. All fields except id are optional (partial update — undefined fields are not overwritten).',
+  'Update a Remodel\'s content, linked events, or metadata. All fields except id are optional (partial update — undefined fields are not overwritten).',
   {
     id: z.string().describe('Remodel ID to update'),
     aggregateLabel: z.string().optional().describe('Aggregate name (top cell)'),
@@ -859,7 +1065,7 @@ server.tool(
     queryContent: z.string().optional().describe('Query description'),
     returnTypeLabel: z.string().optional().describe('Return type name (bottom-right cell)'),
     returnTypeContent: z.string().optional().describe('Return type description'),
-    linkedBundleIds: z.array(z.string()).optional().describe('Complete replacement of linked bundle IDs (not append)'),
+    linkedEventIds: z.array(z.string()).optional().describe('Complete replacement of linked DomainEvent note IDs (stored in linkedBundleIds)'),
     linkedDtoIds: z.array(z.string()).optional().describe('Complete replacement of linked Dto StickyNote IDs (not append)'),
     sourceEventsExpanded: z.boolean().optional().describe('Source Events area expanded state'),
     x: z.number().optional().describe('New X position'),
@@ -868,7 +1074,7 @@ server.tool(
     phase: z.string().optional().describe('Phase or stage label'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
   },
-  async ({ id, aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedBundleIds, linkedDtoIds, sourceEventsExpanded, x, y, paths, phase, notes }) => {
+  async ({ id, aggregateLabel, aggregateContent, parameterLabel, parameterContent, queryLabel, queryContent, returnTypeLabel, returnTypeContent, linkedEventIds, linkedDtoIds, sourceEventsExpanded, x, y, paths, phase, notes }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const remodel = board.remodels.find((r) => r.id === id);
@@ -876,7 +1082,6 @@ server.tool(
 
     if (x !== undefined) remodel.position.x = x;
     if (y !== undefined) remodel.position.y = y;
-    // Sub-note merge: only update the fields that are explicitly provided
     if (aggregateLabel !== undefined) remodel.aggregateNote.label = aggregateLabel;
     if (aggregateContent !== undefined) remodel.aggregateNote.content = aggregateContent;
     if (parameterLabel !== undefined) remodel.parameterNote.label = parameterLabel;
@@ -885,7 +1090,7 @@ server.tool(
     if (queryContent !== undefined) remodel.queryNote.content = queryContent;
     if (returnTypeLabel !== undefined) remodel.returnTypeNote.label = returnTypeLabel;
     if (returnTypeContent !== undefined) remodel.returnTypeNote.content = returnTypeContent;
-    if (linkedBundleIds !== undefined) remodel.linkedBundleIds = linkedBundleIds;
+    if (linkedEventIds !== undefined) remodel.linkedBundleIds = linkedEventIds;
     if (linkedDtoIds !== undefined) remodel.linkedDtoIds = linkedDtoIds;
     if (sourceEventsExpanded !== undefined) remodel.sourceEventsExpanded = sourceEventsExpanded;
     if (paths !== undefined) remodel.paths = paths;
@@ -897,12 +1102,9 @@ server.tool(
     projectState.updatedAt = remodel.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_remodel', { ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) });
+    await broadcast('update_remodel', remodel);
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({ ...remodel, _isUniverse: isUniverseRemodel(remodel, board.bundles) }, null, 2),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify(remodel, null, 2) }],
     };
   }
 );
@@ -924,85 +1126,8 @@ server.tool(
     await syncProjectToRelay();
     await broadcast('delete_remodel', { id });
     return {
-      content: [{
-        type: 'text' as const,
-        text: JSON.stringify({ success: true, deletedId: id }),
-      }],
+      content: [{ type: 'text' as const, text: JSON.stringify({ success: true, deletedId: id }) }],
     };
-  }
-);
-
-server.tool(
-  'es_add_flow',
-  `Create an entire Event Storming happy path by adding multiple Bundles in one call.
-Bundles are auto-positioned left-to-right (736px spacing, y=200) starting after any existing bundles.
-Optionally auto-links consecutive bundles with arrows. Returns [{ id, index }] for each bundle.
-
-Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty).`,
-  {
-    steps: z.array(z.object({
-      infoLabel: z.string().describe('Entity/AR label (yellow top-center)'),
-      infoContent: z.string().optional().default('').describe('Entity content'),
-      entityLabel: z.string().describe('Command Params label (green bottom-left)'),
-      entityContent: z.string().optional().default('').describe('Params content'),
-      commandLabel: z.string().describe('Command label (blue bottom-center)'),
-      commandContent: z.string().optional().default('').describe('Command content'),
-      eventLabel: z.string().describe('Domain Event label (orange bottom-right)'),
-      eventContent: z.string().optional().default('').describe('Event content'),
-    })).describe('Ordered flow steps, left to right'),
-    autoLink: z.boolean().optional().default(true).describe('Auto-create left-to-right links between consecutive bundles'),
-    startX: z.number().optional().describe('Override X start position for the first bundle (default: auto, appends after existing)'),
-  },
-  async ({ steps, autoLink, startX }) => {
-    await loadProjectFromRelay();
-    const board = getActiveBoard();
-    const now = new Date().toISOString();
-
-    const baseX = startX ?? nextBundleX();
-    const createdIds: string[] = [];
-
-    for (let i = 0; i < steps.length; i++) {
-      const s = steps[i];
-      const bundle: Bundle = {
-        id: uuidv4(),
-        position: { x: baseX + i * 736, y: 200 },
-        infoNote: { label: s.infoLabel, content: s.infoContent ?? '' },
-        entityNote: { label: s.entityLabel, content: s.entityContent ?? '' },
-        commandNote: { label: s.commandLabel, content: s.commandContent ?? '' },
-        eventNote: { label: s.eventLabel, content: s.eventContent ?? '' },
-        zIndex: 1,
-        policies: [],
-        paths: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      board.bundles.push(bundle);
-      createdIds.push(bundle.id);
-      await broadcast('add_bundle', bundle);
-    }
-
-    if (autoLink && createdIds.length > 1) {
-      for (let i = 0; i < createdIds.length - 1; i++) {
-        const link: Link = {
-          id: uuidv4(),
-          fromId: createdIds[i],
-          fromType: 'bundle',
-          toId: createdIds[i + 1],
-          toType: 'bundle',
-          createdAt: now,
-        };
-        board.links.push(link);
-        await broadcast('add_link', link);
-      }
-    }
-
-    board.updatedAt = now;
-    projectState.updatedAt = now;
-    saveProject();
-    await syncProjectToRelay();
-
-    const result = createdIds.map((id, index) => ({ id, index }));
-    return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
   }
 );
 
@@ -1010,11 +1135,11 @@ Example: 3 steps → 3 bundles placed at x=80, x=816, x=1552 (if board is empty)
 
 server.tool(
   'es_set_event_paths',
-  `Batch-assign FlowPath IDs to multiple bundles, notes, and/or remodels in one call (overwrites existing paths — not append).
-Searches bundles[], notes[], and remodels[] so you can mix IDs freely.
+  `Batch-assign FlowPath IDs to multiple notes and/or remodels in one call (overwrites existing paths — not append).
+Searches notes[] and remodels[] so you can mix IDs freely.
 Returns { updated: string[], notFound: string[] }.`,
   {
-    ids: z.array(z.string()).describe('Bundle, Note, or Remodel IDs to update'),
+    ids: z.array(z.string()).describe('Note or Remodel IDs to update'),
     paths: z.array(z.string()).describe('FlowPath IDs to assign (replaces existing paths)'),
   },
   async ({ ids, paths }) => {
@@ -1026,13 +1151,6 @@ Returns { updated: string[], notFound: string[] }.`,
     const notFound: string[] = [];
 
     for (const id of ids) {
-      const bundle = board.bundles.find(b => b.id === id);
-      if (bundle) {
-        bundle.paths = paths;
-        bundle.updatedAt = now;
-        updated.push(id);
-        continue;
-      }
       const note = board.notes.find(n => n.id === id);
       if (note) {
         note.paths = paths;
@@ -1069,11 +1187,11 @@ Returns { updated: string[], notFound: string[] }.`,
 
 server.tool(
   'es_set_event_phase',
-  `Batch-assign a phase label to multiple bundles, notes, and/or remodels in one call (overwrites existing phase).
-Searches bundles[], notes[], and remodels[] so you can mix IDs freely.
+  `Batch-assign a phase label to multiple notes and/or remodels in one call (overwrites existing phase).
+Searches notes[] and remodels[] so you can mix IDs freely.
 Returns { updated: string[], notFound: string[] }.`,
   {
-    ids: z.array(z.string()).describe('Bundle, Note, or Remodel IDs to update'),
+    ids: z.array(z.string()).describe('Note or Remodel IDs to update'),
     phase: z.string().describe('Phase label to assign (e.g. "Discovery", "Order Processing")'),
   },
   async ({ ids, phase }) => {
@@ -1085,13 +1203,6 @@ Returns { updated: string[], notFound: string[] }.`,
     const notFound: string[] = [];
 
     for (const id of ids) {
-      const bundle = board.bundles.find(b => b.id === id);
-      if (bundle) {
-        bundle.phase = phase;
-        bundle.updatedAt = now;
-        updated.push(id);
-        continue;
-      }
       const note = board.notes.find(n => n.id === id);
       if (note) {
         note.phase = phase;
@@ -1131,9 +1242,9 @@ Returns { updated: string[], notFound: string[] }.`,
 server.tool(
   'es_add_flow_path',
   `Add a named FlowPath definition to the active Bounded Context. Returns { id }.
-FlowPaths are color-coded path markers used to categorize Bundles and Notes into named flows
+FlowPaths are color-coded path markers used to categorize Notes into named flows
 (e.g. "Happy Path", "Error Path", "Admin Flow"). After creating a FlowPath, assign its id
-to bundles/notes via es_update_bundle or es_update_note paths field.`,
+to notes via es_update_note paths field.`,
   {
     name: z.string().describe('Display name for this flow path (e.g. "Happy Path", "Error Flow")'),
     color: z.string().describe('CSS color string for this path (e.g. "#4CAF50", "blue", "hsl(120,60%,50%)")'),
@@ -1142,12 +1253,7 @@ to bundles/notes via es_update_bundle or es_update_note paths field.`,
   async ({ name, color, description }) => {
     await loadProjectFromRelay();
     const now = new Date().toISOString();
-    const flowPath: FlowPath = {
-      id: uuidv4(),
-      name,
-      color,
-      description,
-    };
+    const flowPath: FlowPath = { id: uuidv4(), name, color, description };
     const board = getActiveBoard();
     board.flowPaths.push(flowPath);
     board.updatedAt = now;
@@ -1161,7 +1267,7 @@ to bundles/notes via es_update_bundle or es_update_note paths field.`,
 
 server.tool(
   'es_delete_flow_path',
-  'Delete a FlowPath definition from the active Bounded Context by ID. Note: this does NOT remove the path id from bundles/notes that reference it.',
+  'Delete a FlowPath definition from the active Bounded Context by ID. Note: this does NOT remove the path id from notes that reference it.',
   { id: z.string().describe('FlowPath ID to delete') },
   async ({ id }) => {
     await loadProjectFromRelay();
@@ -1182,12 +1288,12 @@ server.tool(
 
 server.tool(
   'es_add_link',
-  'Create a directional link between two elements (notes, bundles, or remodels) in the active context. Returns { id }.',
+  'Create a directional link between two elements (notes or remodels) in the active context. Returns { id }.',
   {
     fromId: z.string().describe('ID of the source element'),
-    fromType: z.enum(['note', 'bundle', 'remodel']).describe('Type of the source element'),
+    fromType: z.enum(['note', 'remodel']).describe('Type of the source element'),
     toId: z.string().describe('ID of the target element'),
-    toType: z.enum(['note', 'bundle', 'remodel']).describe('Type of the target element'),
+    toType: z.enum(['note', 'remodel']).describe('Type of the target element'),
     label: z.string().optional().describe('Optional label for the link'),
   },
   async ({ fromId, fromType, toId, toType, label }) => {

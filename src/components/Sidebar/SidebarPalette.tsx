@@ -1,9 +1,8 @@
 import React from 'react';
-import { v4 as uuidv4 } from 'uuid';
 import { ELEMENT_CONFIGS, ELEMENT_TYPE_LIST } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
-import type { ElementType, Bundle, BundleSubNote } from '../../types/elements';
+import type { ElementType } from '../../types/elements';
 
 interface Props {
   collapsed: boolean;
@@ -29,49 +28,10 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     activeToolType, setActiveToolType,
     zoom, setZoom, resetView, fitAll,
     isLinkingMode, setLinkingMode,
-    selectedNoteIds, setSelectedNoteIds,
     setCurrentView,
   } = useUIStore();
-  const { addBundle, deleteNote, addBoard, renameBoard, openBoard, project } = useBoardStore();
+  const { addBoard, renameBoard, openBoard, project } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
-
-  const handleBundleSelected = () => {
-    const selectedNotes = activeBoard.notes.filter((n) => selectedNoteIds.includes(n.id));
-    if (selectedNotes.length < 2) return;
-
-    // Map by type: Aggregate→info, Command→command, DomainEvent→event, others→entity
-    const toSubNote = (n: typeof selectedNotes[0] | undefined): BundleSubNote =>
-      n ? { label: n.label, content: '' } : { label: '', content: '' };
-
-    const aggregate = selectedNotes.find((n) => n.type === 'Aggregate');
-    const command = selectedNotes.find((n) => n.type === 'Command');
-    const event = selectedNotes.find((n) => n.type === 'DomainEvent');
-    const entityCandidates = selectedNotes.filter(
-      (n) => n !== aggregate && n !== command && n !== event
-    );
-    const entity = entityCandidates[0];
-
-    const usedIds = [aggregate?.id, command?.id, event?.id, entity?.id].filter(Boolean) as string[];
-
-    const avgX = selectedNotes.reduce((s, n) => s + n.position.x, 0) / selectedNotes.length;
-    const avgY = selectedNotes.reduce((s, n) => s + n.position.y, 0) / selectedNotes.length;
-
-    const newBundle: Bundle = {
-      id: uuidv4(),
-      position: { x: avgX - (160 * 3 + 8 * 2) / 2, y: avgY - (120 * 2 + 8) / 2 },
-      infoNote: toSubNote(aggregate),
-      entityNote: toSubNote(entity),
-      commandNote: toSubNote(command),
-      eventNote: toSubNote(event),
-      zIndex: 10 + activeBoard.bundles.length,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-
-    addBundle(newBundle);
-    usedIds.forEach((id) => deleteNote(id));
-    setSelectedNoteIds([]);
-  };
 
   const handleToolClick = (type: string) => {
     if (type === 'Link') {
@@ -88,7 +48,6 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     const rect = viewport?.getBoundingClientRect();
     fitAll({
       notes: activeBoard.notes,
-      bundles: activeBoard.bundles,
       remodels: activeBoard.remodels,
       viewportWidth: rect?.width ?? window.innerWidth,
       viewportHeight: rect?.height ?? window.innerHeight,
@@ -158,13 +117,13 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     const contextBoards = project.boards.filter((b) => !b.parentContextId);
 
     const getHealth = (board: typeof project.boards[0]): 'green' | 'yellow' | 'red' => {
-      if (board.notes.length === 0 && board.bundles.length === 0) return 'red';
+      if (board.notes.length === 0) return 'red';
       if (board.links.length === 0) return 'yellow';
       return 'green';
     };
 
     const HEALTH_DOT: Record<'green' | 'yellow' | 'red', { color: string; title: string }> = {
-      green:  { color: '#22c55e', title: 'Complete (has bundles + links)' },
+      green:  { color: '#22c55e', title: 'Complete (has notes + links)' },
       yellow: { color: '#f59e0b', title: 'In progress (no links yet)' },
       red:    { color: '#ef4444', title: 'Empty' },
     };
@@ -183,11 +142,11 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
         noteTypeCounts[note.type] = (noteTypeCounts[note.type] ?? 0) + 1;
       }
     }
-    const totalNotes   = Object.values(noteTypeCounts).reduce((s, n) => s + n, 0);
-    const totalBundles = project.boards.reduce((s, b) => s + b.bundles.length, 0);
-    const avgBundles   = contextBoards.length > 0
-      ? (totalBundles / contextBoards.length).toFixed(1)
-      : '0';
+    const totalNotes = Object.values(noteTypeCounts).reduce((s, n) => s + n, 0);
+    const totalEvents = project.boards.reduce(
+      (s, b) => s + b.notes.filter((n) => n.type === 'DomainEvent').length,
+      0
+    );
 
     // Top types for bar + legend (sorted by count desc)
     const sortedTypes = (Object.entries(noteTypeCounts) as [ElementType, number][])
@@ -212,7 +171,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
           <div title={`${contextBoards.length} contexts`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊡</div>
           <div title={dot.title} style={{ width: 10, height: 10, borderRadius: '50%', background: dot.color, margin: '2px auto' }} />
           <div title={`${totalNotes} notes`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>📝</div>
-          <div title={`${totalBundles} bundles`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⊞</div>
+          <div title={`${totalEvents} domain events`} style={{ color: '#94a3b8', fontSize: 13, padding: '6px 0' }}>⚡</div>
           <div style={{ flex: 1 }} />
           <button onClick={onShowExport} title="Export Markdown"
             style={{ background: '#0f766e', border: 'none', borderRadius: 8, color: '#fff', cursor: 'pointer', fontSize: 16, padding: '10px 0', width: '100%' }}>
@@ -255,10 +214,9 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
                 {board.name}
               </span>
               {/* counts */}
-              {(board.bundles.length > 0 || board.notes.length > 0) && (
+              {board.notes.length > 0 && (
                 <span style={{ display: 'flex', gap: 6, color: '#64748b', fontSize: 11, flexShrink: 0 }}>
-                  {board.bundles.length > 0 && <span>⊞{board.bundles.length}</span>}
-                  {board.notes.length   > 0 && <span>📝{board.notes.length}</span>}
+                  <span>📝{board.notes.length}</span>
                 </span>
               )}
             </button>
@@ -321,11 +279,11 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
           )}
         </div>
 
-        {/* ── Bundles ── */}
-        {sectionLabel('Bundles')}
+        {/* ── Events ── */}
+        {sectionLabel('Domain Events')}
         <div style={{ padding: '0 12px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>avg {avgBundles} / context</span>
-          <span style={{ color: '#cbd5e1', fontSize: 13, fontWeight: 700 }}>{totalBundles}</span>
+          <span style={{ color: '#94a3b8', fontSize: 12 }}>across all contexts</span>
+          <span style={{ color: '#fb923c', fontSize: 13, fontWeight: 700 }}>{totalEvents}</span>
         </div>
 
         <div style={{ flex: 1 }} />
@@ -353,31 +311,6 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
   return (
     <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden' }}>
       {sectionLabel('Elements')}
-
-      {/* Bundle special button */}
-      <button
-        onClick={() => handleToolClick('Bundle')}
-        title="Bundle (4-in-1)"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: collapsed ? 0 : 8,
-          justifyContent: collapsed ? 'center' : 'flex-start',
-          padding: collapsed ? '10px 0' : '8px 12px',
-          margin: '2px 8px',
-          borderRadius: 8,
-          border: activeToolType === 'Bundle' ? '2px solid #3b82f6' : '2px solid #334155',
-          background: activeToolType === 'Bundle' ? 'rgba(59,130,246,0.15)' : '#1e293b',
-          cursor: 'pointer',
-          color: '#e2e8f0',
-          fontSize: 13,
-          width: collapsed ? '100%' : 'calc(100% - 16px)',
-          boxSizing: 'border-box',
-        }}
-      >
-        <span style={{ fontSize: 16 }}>⊞</span>
-        {!collapsed && <span style={{ fontWeight: 600 }}>Bundle (4-in-1)</span>}
-      </button>
 
       {/* Remodel special button */}
       <button
@@ -411,33 +344,6 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
       })}
 
       {sectionLabel('Tools')}
-
-      {/* Bundle selected notes */}
-      {selectedNoteIds.length >= 2 && (
-        <button
-          onClick={handleBundleSelected}
-          title={`Bundle ${selectedNoteIds.length} selected notes`}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: collapsed ? 0 : 8,
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            padding: collapsed ? '10px 0' : '8px 12px',
-            margin: '2px 8px',
-            borderRadius: 8,
-            border: '2px solid #f59e0b',
-            background: 'rgba(245,158,11,0.15)',
-            cursor: 'pointer',
-            color: '#fbbf24',
-            fontSize: 13,
-            width: collapsed ? '100%' : 'calc(100% - 16px)',
-            boxSizing: 'border-box',
-          }}
-        >
-          <span style={{ fontSize: 16 }}>⊞</span>
-          {!collapsed && <span>Bundle Selected ({selectedNoteIds.length})</span>}
-        </button>
-      )}
 
       {/* Link tool */}
       <button

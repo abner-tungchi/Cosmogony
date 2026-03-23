@@ -20,6 +20,6 @@ ${markdown}
 ---
 
 請根據以上現有的 Event Storming，繼續完善這個 Bounded Context。
-你可以使用 MCP 工具（es_add_bundle、es_add_note、es_add_link 等）直接在畫布上新增元素，
+你可以使用 MCP 工具（es_add_command_for_event、es_add_note、es_add_link 等）直接在畫布上新增元素，
 或提出分析與建議。`;
 }

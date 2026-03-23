@@ -11,7 +11,7 @@ import { useApiSync } from './utils/apiSync';
 
 function App() {
   useApiSync();
-  const { deleteNote, deleteBundle, deleteRemodel } = useBoardStore();
+  const { deleteNote, deleteRemodel } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
   const {
     selectedNoteIds,
@@ -53,8 +53,6 @@ function App() {
         if (selectedElementId && selectedElementType) {
           if (selectedElementType === 'note') {
             deleteNote(selectedElementId);
-          } else if (selectedElementType === 'bundle') {
-            deleteBundle(selectedElementId);
           } else if (selectedElementType === 'remodel') {
             deleteRemodel(selectedElementId);
           }
@@ -65,7 +63,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedNoteIds, selectedElementId, selectedElementType, deleteNote, deleteBundle, deleteRemodel, setSelectedNoteIds, setSelectedElement]);
+  }, [selectedNoteIds, selectedElementId, selectedElementType, deleteNote, deleteRemodel, setSelectedNoteIds, setSelectedElement]);
 
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', display: 'flex' }}>

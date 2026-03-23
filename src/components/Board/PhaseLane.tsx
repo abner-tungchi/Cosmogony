@@ -1,8 +1,5 @@
 import React, { useMemo } from 'react';
-import type { StickyNote, Bundle } from '../../types/elements';
-
-const BUNDLE_EXPANDED_W = 496;
-const BUNDLE_COLLAPSED_W = 200;
+import type { StickyNote } from '../../types/elements';
 
 const LANE_HEIGHT = 10000;
 const LABEL_TOP = 16;
@@ -19,10 +16,9 @@ interface PhaseRange {
 
 interface PhaseLaneProps {
   notes: StickyNote[];
-  bundles: Bundle[];
 }
 
-function computePhaseRanges(notes: StickyNote[], bundles: Bundle[]): PhaseRange[] {
+function computePhaseRanges(notes: StickyNote[]): PhaseRange[] {
   const phaseMap = new Map<string, { minX: number; maxX: number }>();
 
   const expandRange = (phase: string, x: number, rightEdge: number) => {
@@ -40,42 +36,30 @@ function computePhaseRanges(notes: StickyNote[], bundles: Bundle[]): PhaseRange[
     expandRange(note.phase, note.position.x, note.position.x + note.size.width);
   }
 
-  for (const bundle of bundles) {
-    if (!bundle.phase) continue;
-    const w = bundle.collapsed ? BUNDLE_COLLAPSED_W : BUNDLE_EXPANDED_W;
-    expandRange(bundle.phase, bundle.position.x, bundle.position.x + w);
-  }
-
   const ranges: PhaseRange[] = [];
   for (const [name, { minX, maxX }] of phaseMap.entries()) {
     ranges.push({ name, minX, maxX });
   }
 
-  // Sort by minX so adjacent lanes are in spatial order
   ranges.sort((a, b) => a.minX - b.minX);
-
   return ranges;
 }
 
-export const PhaseLane: React.FC<PhaseLaneProps> = ({ notes, bundles }) => {
-  const phases = useMemo(() => computePhaseRanges(notes, bundles), [notes, bundles]);
+export const PhaseLane: React.FC<PhaseLaneProps> = ({ notes }) => {
+  const phases = useMemo(() => computePhaseRanges(notes), [notes]);
 
   if (phases.length === 0) return null;
 
-  // Compute divider X positions between adjacent phases
-  // Divider X = midpoint between left phase maxX and right phase minX
   const dividerXs: number[] = [];
   for (let i = 0; i < phases.length - 1; i++) {
     const leftMax = phases[i].maxX;
     const rightMin = phases[i + 1].minX;
-    // If phases overlap or touch, use the boundary between them
     const divX = leftMax >= rightMin ? rightMin : (leftMax + rightMin) / 2;
     dividerXs.push(divX);
   }
 
   return (
     <>
-      {/* Phase background columns — very subtle fill to visually anchor each lane */}
       {phases.map((phase, i) => {
         const leftBound = i === 0
           ? phase.minX - 80
@@ -102,7 +86,6 @@ export const PhaseLane: React.FC<PhaseLaneProps> = ({ notes, bundles }) => {
         );
       })}
 
-      {/* Vertical dashed dividers between adjacent phases */}
       {dividerXs.map((x, i) => (
         <div
           key={`phase-divider-${i}`}
@@ -119,7 +102,6 @@ export const PhaseLane: React.FC<PhaseLaneProps> = ({ notes, bundles }) => {
         />
       ))}
 
-      {/* Phase labels — pill style at top of each lane */}
       {phases.map((phase, i) => {
         const leftBound = i === 0
           ? phase.minX - 80

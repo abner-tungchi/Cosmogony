@@ -11,7 +11,7 @@ type ContextMenuState =
 
 export const PathBar: React.FC = () => {
   const activeBoard = useBoardStore(selectActiveBoard);
-  const { addFlowPath, updateFlowPath, deleteFlowPath, addActorBoard, setActiveBoard } =
+  const { addFlowPath, updateFlowPath, deleteFlowPath, addActorBoard, setActiveBoard, renameBoard, deleteBoard } =
     useBoardStore();
   const project = useBoardStore((s) => s.project);
   const { activePath, setActivePath, activeActorFilter } = useUIStore();
@@ -23,6 +23,10 @@ export const PathBar: React.FC = () => {
   const [actorDropdownPos, setActorDropdownPos] = useState<{ top: number; left: number } | null>(
     null,
   );
+  const [renamingActorId, setRenamingActorId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [confirmDeleteActorId, setConfirmDeleteActorId] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const actorDropdownRef = useRef<HTMLDivElement>(null);
   const actorButtonRef = useRef<HTMLButtonElement>(null);
@@ -93,11 +97,10 @@ export const PathBar: React.FC = () => {
     const counts: Record<string, number> = {};
     for (const fp of activeBoard.flowPaths) {
       const noteCount = activeBoard.notes.filter((n) => n.paths?.includes(fp.id)).length;
-      const bundleCount = activeBoard.bundles.filter((b) => b.paths?.includes(fp.id)).length;
-      counts[fp.id] = noteCount + bundleCount;
+      counts[fp.id] = noteCount;
     }
     return counts;
-  }, [activeBoard.flowPaths, activeBoard.notes, activeBoard.bundles]);
+  }, [activeBoard.flowPaths, activeBoard.notes]);
 
   const handleCreatePath = useCallback(
     (data: Omit<FlowPath, 'id'>) => {
@@ -150,11 +153,8 @@ export const PathBar: React.FC = () => {
     }
   };
 
-  const selectedActorLabel = useMemo(() => {
-    if (project.activeBoardId === currentContextId) return 'All Actors';
-    const actorBoard = actorSubBoards.find((b) => b.id === project.activeBoardId);
-    return actorBoard?.name || 'All Actors';
-  }, [project.activeBoardId, currentContextId, actorSubBoards]);
+  // selectedActorLabel reserved for future multi-actor feature
+  // const selectedActorLabel = ...
 
   return (
     <>
@@ -188,55 +188,7 @@ export const PathBar: React.FC = () => {
           PATH
         </span>
 
-        {/* Actor filter / board switcher dropdown trigger */}
-        <button
-          ref={actorButtonRef}
-          onClick={() => {
-            if (actorDropdownOpen) {
-              setActorDropdownOpen(false);
-              setActorDropdownPos(null);
-            } else {
-              const rect = actorButtonRef.current?.getBoundingClientRect();
-              if (rect) {
-                setActorDropdownPos({ top: rect.bottom + 4, left: rect.left });
-              }
-              setActorDropdownOpen(true);
-            }
-          }}
-          style={{
-            height: 28,
-            padding: '0 10px',
-            borderRadius: 14,
-            fontSize: 11,
-            fontWeight: project.activeBoardId !== currentContextId ? 600 : 500,
-            background: project.activeBoardId !== currentContextId ? 'rgba(59,130,246,0.08)' : 'transparent',
-            color: project.activeBoardId !== currentContextId ? '#3b82f6' : '#64748b',
-            border: `1px solid ${project.activeBoardId !== currentContextId ? 'rgba(59,130,246,0.3)' : 'rgba(0,0,0,0.08)'}`,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            transition: 'all 150ms ease',
-            whiteSpace: 'nowrap',
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontSize: 12 }}>👤</span>
-          {selectedActorLabel}
-          <span style={{ fontSize: 9, opacity: 0.6, marginLeft: 2 }}>▾</span>
-        </button>
-
-        {/* Separator */}
-        <div
-          style={{
-            width: 1,
-            height: 18,
-            background: 'rgba(0,0,0,0.08)',
-            flexShrink: 0,
-            marginLeft: 2,
-            marginRight: 2,
-          }}
-        />
+        {/* Actor filter hidden — reserved for future multi-actor feature */}
 
         {/* "All" tab */}
         <button
@@ -347,14 +299,14 @@ export const PathBar: React.FC = () => {
         </button>
       </div>
 
-      {/* Actor dropdown — rendered at fixed position to escape stacking context */}
-      {actorDropdownOpen && actorDropdownPos && (
+      {/* Actor dropdown — hidden, reserved for future multi-actor feature */}
+      {false && actorDropdownOpen && actorDropdownPos != null && (
         <div
           ref={actorDropdownRef}
           style={{
             position: 'fixed',
-            top: actorDropdownPos.top,
-            left: actorDropdownPos.left,
+            top: actorDropdownPos!.top,
+            left: actorDropdownPos!.left,
             background: '#ffffff',
             border: '1px solid rgba(0,0,0,0.1)',
             borderRadius: 8,
@@ -405,52 +357,91 @@ export const PathBar: React.FC = () => {
           {/* Actor sub-board list */}
           {actorSubBoards.map((actorBoard) => {
             const isSelected = actorBoard.id === project.activeBoardId;
-            return (
-              <button
-                key={actorBoard.id}
-                onClick={() => {
-                  setActiveBoard(actorBoard.id);
-                  setActorDropdownOpen(false);
-                  setActorDropdownPos(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  width: '100%',
-                  padding: '8px 12px',
-                  border: 'none',
-                  background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent',
-                  textAlign: 'left',
-                  fontSize: 12,
-                  color: isSelected ? '#3b82f6' : '#1e293b',
-                  fontWeight: isSelected ? 600 : 400,
-                  cursor: 'pointer',
-                  transition: 'background 100ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = '#f8fafc';
-                }}
-                onMouseLeave={(e) => {
-                  if (!isSelected) e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <span style={{ fontSize: 12 }}>👤</span>
-                <span style={{ flex: 1 }}>{actorBoard.name}</span>
-                {isSelected && (
-                  <span
-                    style={{
-                      fontSize: 10,
-                      color: '#3b82f6',
-                      background: 'rgba(59,130,246,0.08)',
-                      borderRadius: 4,
-                      padding: '1px 5px',
+            const isRenaming = renamingActorId === actorBoard.id;
+            const isConfirmingDelete = confirmDeleteActorId === actorBoard.id;
+
+            if (isConfirmingDelete) {
+              return (
+                <div key={actorBoard.id} style={{ padding: '8px 12px', background: '#fff5f5' }}>
+                  <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 600, marginBottom: 6 }}>
+                    Delete "{actorBoard.name}"?
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => setConfirmDeleteActorId(null)}
+                      style={{ flex: 1, padding: '4px 0', border: '1px solid #e2e8f0', borderRadius: 4, background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer' }}
+                    >Cancel</button>
+                    <button
+                      onClick={() => {
+                        deleteBoard(actorBoard.id);
+                        setConfirmDeleteActorId(null);
+                      }}
+                      style={{ flex: 1, padding: '4px 0', border: 'none', borderRadius: 4, background: '#ef4444', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                    >Delete</button>
+                  </div>
+                </div>
+              );
+            }
+
+            if (isRenaming) {
+              return (
+                <div key={actorBoard.id} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px' }}>
+                  <span style={{ fontSize: 12 }}>👤</span>
+                  <input
+                    ref={renameInputRef}
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        renameBoard(actorBoard.id, renameValue.trim() || actorBoard.name);
+                        setRenamingActorId(null);
+                      }
+                      if (e.key === 'Escape') setRenamingActorId(null);
+                      e.stopPropagation();
                     }}
-                  >
-                    active
-                  </span>
-                )}
-              </button>
+                    onBlur={() => {
+                      renameBoard(actorBoard.id, renameValue.trim() || actorBoard.name);
+                      setRenamingActorId(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ flex: 1, fontSize: 12, padding: '3px 6px', border: '1px solid #3b82f6', borderRadius: 4, outline: 'none', color: '#1e293b' }}
+                    autoFocus
+                  />
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={actorBoard.id}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px 0 12px', background: isSelected ? 'rgba(59,130,246,0.06)' : 'transparent' }}
+                onMouseEnter={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = '#f8fafc'; }}
+                onMouseLeave={(e) => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+              >
+                <button
+                  onClick={() => { setActiveBoard(actorBoard.id); setActorDropdownOpen(false); setActorDropdownPos(null); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, padding: '8px 0', border: 'none', background: 'transparent', textAlign: 'left', fontSize: 12, color: isSelected ? '#3b82f6' : '#1e293b', fontWeight: isSelected ? 600 : 400, cursor: 'pointer' }}
+                >
+                  <span style={{ fontSize: 12 }}>👤</span>
+                  <span style={{ flex: 1 }}>{actorBoard.name}</span>
+                </button>
+                {/* Rename button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setRenameValue(actorBoard.name); setRenamingActorId(actorBoard.id); setConfirmDeleteActorId(null); setTimeout(() => renameInputRef.current?.focus(), 0); }}
+                  title="Rename"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 12, padding: '4px', borderRadius: 3, lineHeight: 1, flexShrink: 0 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#3b82f6'; e.currentTarget.style.background = 'rgba(59,130,246,0.08)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'none'; }}
+                >✎</button>
+                {/* Delete button */}
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteActorId(actorBoard.id); setRenamingActorId(null); }}
+                  title="Delete"
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', fontSize: 14, padding: '4px', borderRadius: 3, lineHeight: 1, flexShrink: 0, marginRight: 4 }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.background = 'rgba(239,68,68,0.08)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; e.currentTarget.style.background = 'none'; }}
+                >×</button>
+              </div>
             );
           })}
 

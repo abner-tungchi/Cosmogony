@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
-import type { Bundle, StickyNote, Policy, FlowPath, Remodel } from '../../types/elements';
-import { isUniverseRemodel } from '../../utils/remodelUtils';
+import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -82,155 +82,430 @@ const InlineField: React.FC<InlineFieldProps> = ({ label, value, placeholder, on
   );
 };
 
-// ─── Bundle Panel ─────────────────────────────────────────────────────────────
+// ─── Property Table ───────────────────────────────────────────────────────────
 
-interface BundlePanelProps {
-  bundle: Bundle;
+interface PropertyTableProps {
+  properties: Property[];
+  onChange: (updated: Property[]) => void;
+}
+
+const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange }) => {
+  const inputBase: React.CSSProperties = {
+    flex: 1,
+    background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 4,
+    color: TEXT_MAIN,
+    fontSize: 12,
+    padding: '4px 8px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  };
+
+  return (
+    <div>
+      {properties.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ flex: 1, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Attr</div>
+            <div style={{ flex: 1, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Type</div>
+            <div style={{ width: 18 }} />
+          </div>
+          {properties.map((prop, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={prop.attrName}
+                placeholder="attrName"
+                onChange={(e) => {
+                  const updated = properties.map((p, idx) => idx === i ? { ...p, attrName: e.target.value } : p);
+                  onChange(updated);
+                }}
+                style={inputBase}
+              />
+              <input
+                type="text"
+                value={prop.type}
+                placeholder="String"
+                onChange={(e) => {
+                  const updated = properties.map((p, idx) => idx === i ? { ...p, type: e.target.value } : p);
+                  onChange(updated);
+                }}
+                style={inputBase}
+              />
+              <button
+                onClick={() => onChange(properties.filter((_, idx) => idx !== i))}
+                style={{
+                  width: 18,
+                  height: 18,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'none',
+                  border: 'none',
+                  color: TEXT_MUTED,
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  padding: 0,
+                  flexShrink: 0,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={() => onChange([...properties, { attrName: '', type: '' }])}
+        style={{
+          background: 'none',
+          border: '1px dashed rgba(255,255,255,0.2)',
+          borderRadius: 4,
+          color: TEXT_MUTED,
+          cursor: 'pointer',
+          fontSize: 11,
+          padding: '4px 8px',
+          width: '100%',
+          fontFamily: 'inherit',
+        }}
+      >
+        + Add Property
+      </button>
+    </div>
+  );
+};
+
+// ─── Editable Color Block ─────────────────────────────────────────────────────
+
+interface EditableColorBlockProps {
+  sectionLabel: string;
+  labelValue: string;
+  contentValue: string;
+  labelPlaceholder: string;
+  contentPlaceholder: string;
+  bgColor: string;
+  textColor: string;
+  fullWidth?: boolean;
+  noLabelInput?: boolean;
+  onLabelChange: (val: string) => void;
+  onContentChange: (val: string) => void;
+  onBlur: () => void;
+}
+
+const EditableColorBlock: React.FC<EditableColorBlockProps> = ({
+  sectionLabel, labelValue, contentValue, labelPlaceholder, contentPlaceholder,
+  bgColor, textColor, fullWidth, noLabelInput, onLabelChange, onContentChange, onBlur,
+}) => {
+  const inputBase: React.CSSProperties = {
+    width: '100%',
+    background: 'rgba(0,0,0,0.1)',
+    border: '1px solid rgba(0,0,0,0.08)',
+    borderRadius: 3,
+    color: textColor,
+    fontSize: 12,
+    padding: '3px 6px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+    lineHeight: 1.4,
+  };
+  return (
+    <div style={{
+      gridColumn: fullWidth ? 'span 2' : undefined,
+      backgroundColor: bgColor,
+      borderRadius: 6,
+      padding: '8px 10px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 4,
+    }}>
+      <div style={{
+        fontSize: 9,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        opacity: 0.6,
+        color: textColor,
+        fontWeight: 600,
+      }}>
+        {sectionLabel}
+      </div>
+      {!noLabelInput && (
+        <input
+          type="text"
+          value={labelValue}
+          placeholder={labelPlaceholder}
+          onChange={(e) => onLabelChange(e.target.value)}
+          onBlur={onBlur}
+          style={{ ...inputBase, fontWeight: 600 }}
+        />
+      )}
+      <textarea
+        value={contentValue}
+        placeholder={contentPlaceholder}
+        onChange={(e) => onContentChange(e.target.value)}
+        onBlur={onBlur}
+        rows={2}
+        style={{ ...inputBase, resize: 'none' }}
+      />
+    </div>
+  );
+};
+
+// ─── DomainEvent Panel ────────────────────────────────────────────────────────
+
+interface DomainEventPanelProps {
+  note: StickyNote;
+  allNotes: StickyNote[];
   flowPaths: FlowPath[];
 }
 
-const BundlePanel: React.FC<BundlePanelProps> = ({ bundle, flowPaths }) => {
-  const { updateBundle } = useBoardStore();
+const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flowPaths }) => {
+  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent } = useBoardStore();
+  const [activeTab, setActiveTab] = useState<'information' | 'event'>('information');
+  const [notesMeta, setNotesMeta] = useState(note.notes ?? '');
+  const [localInfo, setLocalInfo] = useState<Property[]>(note.information ?? []);
+  const [localEventProps, setLocalEventProps] = useState<Property[]>(note.eventProperties ?? []);
 
-  // Local editable state — synced from bundle prop when bundle id changes
-  const [trigger, setTrigger] = useState(bundle.trigger ?? '');
-  const [uiDescription, setUiDescription] = useState(bundle.uiDescription ?? '');
-  const [phase, setPhase] = useState(bundle.phase ?? '');
-  const [notes, setNotes] = useState(bundle.notes ?? '');
-  const [policies, setPolicies] = useState<Policy[]>(bundle.policies ?? []);
-  const [readModels, setReadModels] = useState<string[]>(bundle.readModels ?? []);
-  const [newReadModel, setNewReadModel] = useState('');
+  // Linked Command
+  const linkedCommand = note.commandId ? allNotes.find((n) => n.id === note.commandId) : undefined;
+  // Linked Entity (Aggregate)
+  const linkedEntity = note.entityId ? allNotes.find((n) => n.id === note.entityId) : undefined;
 
-  // Sync when switching between bundles
+  // Sync when switching notes
   useEffect(() => {
-    setTrigger(bundle.trigger ?? '');
-    setUiDescription(bundle.uiDescription ?? '');
-    setPhase(bundle.phase ?? '');
-    setNotes(bundle.notes ?? '');
-    setPolicies(bundle.policies ?? []);
-    setReadModels(bundle.readModels ?? []);
-    setNewReadModel('');
-  }, [bundle.id]);
+    setNotesMeta(note.notes ?? '');
+    setLocalInfo(note.information ?? []);
+    setLocalEventProps(note.eventProperties ?? []);
+    setActiveTab('information');
+  }, [note.id]);
 
-  const saveMeta = useCallback(() => {
-    updateBundle(bundle.id, { trigger, uiDescription, phase });
-  }, [bundle.id, trigger, uiDescription, phase, updateBundle]);
-
-  const saveNotes = useCallback(() => {
-    updateBundle(bundle.id, { notes });
-  }, [bundle.id, notes, updateBundle]);
-
-  const savePolicies = useCallback((updated: Policy[]) => {
-    setPolicies(updated);
-    updateBundle(bundle.id, { policies: updated });
-  }, [bundle.id, updateBundle]);
-
-  const saveReadModels = useCallback((updated: string[]) => {
-    setReadModels(updated);
-    updateBundle(bundle.id, { readModels: updated });
-  }, [bundle.id, updateBundle]);
-
-  // Path toggle
   const togglePath = (pathId: string) => {
-    const current = bundle.paths ?? [];
+    const current = note.paths ?? [];
     const updated = current.includes(pathId)
       ? current.filter((p) => p !== pathId)
       : [...current, pathId];
-    updateBundle(bundle.id, { paths: updated });
+    updateNote(note.id, { paths: updated });
   };
 
-  // Policy helpers
-  const addPolicy = () => {
-    savePolicies([...policies, { rule: '', severity: 'warn' }]);
+  const saveNotesMeta = useCallback(() => {
+    updateNote(note.id, { notes: notesMeta });
+  }, [note.id, notesMeta, updateNote]);
+
+  const saveInformation = useCallback(() => {
+    if (linkedCommand) {
+      updateCommandInformation(linkedCommand.id, localInfo);
+    }
+  }, [linkedCommand, localInfo, updateCommandInformation]);
+
+  const saveEventProperties = useCallback(() => {
+    updateEventProperties(note.id, localEventProps);
+  }, [note.id, localEventProps, updateEventProperties]);
+
+  const handleUnlinkEntity = () => {
+    linkEntityToEvent(note.id, undefined);
   };
 
-  const updatePolicyRule = (index: number, rule: string) => {
-    const updated = policies.map((p, i) => i === index ? { ...p, rule } : p);
-    setPolicies(updated);
-  };
-
-  const savePolicy = (index: number, rule: string) => {
-    const updated = policies.map((p, i) => i === index ? { ...p, rule } : p);
-    savePolicies(updated);
-  };
-
-  const togglePolicySeverity = (index: number) => {
-    const updated = policies.map((p, i) =>
-      i === index ? { ...p, severity: p.severity === 'block' ? 'warn' : 'block' } as Policy : p
-    );
-    savePolicies(updated);
-  };
-
-  const deletePolicy = (index: number) => {
-    savePolicies(policies.filter((_, i) => i !== index));
-  };
-
-  // ReadModel helpers
-  const addReadModel = () => {
-    const val = newReadModel.trim();
-    if (!val) return;
-    saveReadModels([...readModels, val]);
-    setNewReadModel('');
-  };
-
-  const deleteReadModel = (index: number) => {
-    saveReadModels(readModels.filter((_, i) => i !== index));
-  };
-
-  const bundlePaths = bundle.paths ?? [];
+  const notePaths = note.paths ?? [];
 
   return (
     <div style={{ padding: '0 16px 24px' }}>
-      {/* Color block summary — FigJam style */}
+      {/* Type badge */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
+        display: 'inline-flex',
+        alignItems: 'center',
         gap: 6,
-        marginBottom: 20,
+        background: '#FF8C00',
+        borderRadius: 4,
+        padding: '3px 8px',
+        marginBottom: 16,
       }}>
-        {/* Aggregate (yellow) — full width */}
-        <ColorBlock
-          label="Aggregate"
-          content={bundle.infoNote.content || bundle.infoNote.label}
-          bgColor="#FFD600"
-          textColor="#333"
-          fullWidth
-        />
-        {/* Command (blue) — left */}
-        <ColorBlock
-          label="Command"
-          content={bundle.commandNote.content || bundle.commandNote.label}
-          bgColor="#1E88E5"
-          textColor="#fff"
-        />
-        {/* Event (orange) — right */}
-        <ColorBlock
-          label="Event"
-          content={bundle.eventNote.content || bundle.eventNote.label}
-          bgColor="#FF8C00"
-          textColor="#fff"
-        />
-        {/* Information / Params (green) — full width */}
-        <ColorBlock
-          label="Params"
-          content={bundle.entityNote.content || bundle.entityNote.label}
-          bgColor="#43A047"
-          textColor="#fff"
-          fullWidth
-        />
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>Domain Event</span>
       </div>
 
+      {/* LINKED COMMAND section */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Linked Command</SectionLabel>
+        {linkedCommand ? (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'rgba(30,136,229,0.12)',
+            border: '1px solid rgba(30,136,229,0.3)',
+            borderRadius: 6,
+            padding: '6px 10px',
+          }}>
+            <div style={{
+              width: 8,
+              height: 8,
+              borderRadius: 2,
+              background: '#1E88E5',
+              flexShrink: 0,
+            }} />
+            <span style={{ fontSize: 12, color: '#93c5fd', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {linkedCommand.label || '(Unnamed Command)'}
+            </span>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+            No command linked — use [+ Command] on the note
+          </div>
+        )}
+      </div>
+
+      {/* PROPERTIES tabs — Information (Command input) + Event (output) */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderBottom: `1px solid ${BORDER_COLOR}` }}>
+          {(['information', 'event'] as const).map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              style={{
+                padding: '6px 12px',
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === tab ? '2px solid #3b82f6' : '2px solid transparent',
+                color: activeTab === tab ? TEXT_MAIN : TEXT_DIM,
+                cursor: 'pointer',
+                fontSize: 12,
+                fontWeight: activeTab === tab ? 600 : 400,
+                fontFamily: 'inherit',
+                marginBottom: -1,
+              }}
+            >
+              {tab === 'information' ? 'Command Input' : 'Event Output'}
+            </button>
+          ))}
+        </div>
+
+        {activeTab === 'information' && (
+          <div>
+            {!linkedCommand && (
+              <div style={{ fontSize: 11, color: TEXT_MUTED, fontStyle: 'italic', marginBottom: 8 }}>
+                Link a command first to edit input parameters
+              </div>
+            )}
+            <PropertyTable
+              properties={localInfo}
+              onChange={(updated) => {
+                setLocalInfo(updated);
+                if (linkedCommand) {
+                  updateCommandInformation(linkedCommand.id, updated);
+                }
+              }}
+            />
+            {linkedCommand && localInfo.length > 0 && (
+              <button
+                onClick={saveInformation}
+                style={{
+                  marginTop: 6,
+                  background: 'rgba(59,130,246,0.15)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  borderRadius: 4,
+                  color: '#93c5fd',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Save
+              </button>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'event' && (
+          <div>
+            <PropertyTable
+              properties={localEventProps}
+              onChange={(updated) => {
+                setLocalEventProps(updated);
+                updateEventProperties(note.id, updated);
+              }}
+            />
+            {localEventProps.length > 0 && (
+              <button
+                onClick={saveEventProperties}
+                style={{
+                  marginTop: 6,
+                  background: 'rgba(59,130,246,0.15)',
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  borderRadius: 4,
+                  color: '#93c5fd',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  padding: '4px 10px',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Save
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 16 }} />
+
+      {/* LINKED ENTITY section */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Linked Entity (Aggregate)</SectionLabel>
+        {linkedEntity ? (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: 'rgba(255,214,0,0.1)',
+            border: '1px solid rgba(255,214,0,0.25)',
+            borderRadius: 6,
+            padding: '6px 10px',
+          }}>
+            <span style={{ fontSize: 12, color: '#fde047', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {linkedEntity.label || '(Unnamed Aggregate)'}
+            </span>
+            <button
+              onClick={handleUnlinkEntity}
+              title="Remove entity link"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                padding: '0 0 0 8px',
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+            No entity linked — use [Set Entity] on the note
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 16 }} />
+
       {/* PATHS section */}
-      <div style={{ marginBottom: 20 }}>
+      <div style={{ marginBottom: 16 }}>
         <SectionLabel>Paths</SectionLabel>
         {flowPaths.length === 0 ? (
           <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-            尚未建立任何 Path
+            No paths created yet
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {flowPaths.map((fp) => {
-              const checked = bundlePaths.includes(fp.id);
+              const checked = notePaths.includes(fp.id);
               return (
                 <label
                   key={fp.id}
@@ -248,15 +523,7 @@ const BundlePanel: React.FC<BundlePanelProps> = ({ bundle, flowPaths }) => {
                     onChange={() => togglePath(fp.id)}
                     style={{ accentColor: fp.color, width: 14, height: 14 }}
                   />
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: fp.color,
-                      flexShrink: 0,
-                    }}
-                  />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: fp.color, flexShrink: 0 }} />
                   <span style={{ fontSize: 13 }}>{fp.name}</span>
                 </label>
               );
@@ -265,150 +532,14 @@ const BundlePanel: React.FC<BundlePanelProps> = ({ bundle, flowPaths }) => {
         )}
       </div>
 
-      {/* META section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Meta</SectionLabel>
-        <InlineField
-          label="Trigger"
-          value={trigger}
-          placeholder="觸發條件..."
-          onChange={setTrigger}
-          onBlur={saveMeta}
-        />
-        <InlineField
-          label="UI Description"
-          value={uiDescription}
-          placeholder="UI 說明..."
-          onChange={setUiDescription}
-          onBlur={saveMeta}
-        />
-        <InlineField
-          label="Phase"
-          value={phase}
-          placeholder="階段..."
-          onChange={setPhase}
-          onBlur={saveMeta}
-        />
-      </div>
-
-      {/* POLICIES section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Policies</SectionLabel>
-        {policies.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-            {policies.map((policy, i) => (
-              <PolicyRow
-                key={i}
-                policy={policy}
-                onToggleSeverity={() => togglePolicySeverity(i)}
-                onChangeRule={(rule) => updatePolicyRule(i, rule)}
-                onSave={(rule) => savePolicy(i, rule)}
-                onDelete={() => deletePolicy(i)}
-              />
-            ))}
-          </div>
-        )}
-        <button
-          onClick={addPolicy}
-          style={{
-            background: 'none',
-            border: '1px dashed rgba(255,255,255,0.2)',
-            borderRadius: 4,
-            color: TEXT_MUTED,
-            cursor: 'pointer',
-            fontSize: 12,
-            padding: '5px 10px',
-            width: '100%',
-          }}
-        >
-          + 新增規則
-        </button>
-      </div>
-
-      {/* READ MODELS section */}
-      {(readModels.length > 0 || true) && (
-        <div style={{ marginBottom: 20 }}>
-          <SectionLabel>Read Models</SectionLabel>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-            {readModels.map((rm, i) => (
-              <span
-                key={i}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  background: 'rgba(152,195,121,0.15)',
-                  border: '1px solid rgba(152,195,121,0.4)',
-                  borderRadius: 4,
-                  padding: '2px 6px',
-                  fontSize: 12,
-                  color: '#98C379',
-                }}
-              >
-                {rm}
-                <button
-                  onClick={() => deleteReadModel(i)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#98C379',
-                    cursor: 'pointer',
-                    padding: 0,
-                    fontSize: 12,
-                    lineHeight: 1,
-                    opacity: 0.7,
-                  }}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <input
-              type="text"
-              value={newReadModel}
-              onChange={(e) => setNewReadModel(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addReadModel(); } }}
-              placeholder="新增 Read Model..."
-              style={{
-                flex: 1,
-                background: 'rgba(255,255,255,0.06)',
-                border: '1px solid rgba(255,255,255,0.1)',
-                borderRadius: 4,
-                color: TEXT_MAIN,
-                fontSize: 12,
-                padding: '5px 8px',
-                outline: 'none',
-                fontFamily: 'inherit',
-              }}
-            />
-            <button
-              onClick={addReadModel}
-              style={{
-                background: 'rgba(152,195,121,0.2)',
-                border: '1px solid rgba(152,195,121,0.4)',
-                borderRadius: 4,
-                color: '#98C379',
-                cursor: 'pointer',
-                fontSize: 12,
-                padding: '5px 10px',
-              }}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* NOTES section */}
       <div>
         <SectionLabel>Notes</SectionLabel>
         <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value)}
-          onBlur={saveNotes}
-          placeholder="新增備注..."
+          value={notesMeta}
+          onChange={(e) => setNotesMeta(e.target.value)}
+          onBlur={saveNotesMeta}
+          placeholder="Add notes..."
           rows={4}
           style={{
             width: '100%',
@@ -427,119 +558,6 @@ const BundlePanel: React.FC<BundlePanelProps> = ({ bundle, flowPaths }) => {
           }}
         />
       </div>
-    </div>
-  );
-};
-
-// ─── Color Block ──────────────────────────────────────────────────────────────
-
-interface ColorBlockProps {
-  label: string;
-  content: string;
-  bgColor: string;
-  textColor: string;
-  fullWidth?: boolean;
-}
-
-const ColorBlock: React.FC<ColorBlockProps> = ({ label, content, bgColor, textColor, fullWidth }) => (
-  <div
-    style={{
-      gridColumn: fullWidth ? 'span 2' : undefined,
-      backgroundColor: bgColor,
-      borderRadius: 6,
-      padding: '8px 10px',
-    }}
-  >
-    <div style={{
-      fontSize: 10,
-      textTransform: 'uppercase',
-      letterSpacing: '0.05em',
-      opacity: 0.65,
-      marginBottom: 4,
-      color: textColor,
-    }}>
-      {label}
-    </div>
-    <div style={{ fontSize: 12, color: textColor, wordBreak: 'break-word', lineHeight: 1.4 }}>
-      {content || <span style={{ opacity: 0.45, fontStyle: 'italic' }}>—</span>}
-    </div>
-  </div>
-);
-
-// ─── Policy Row ───────────────────────────────────────────────────────────────
-
-interface PolicyRowProps {
-  policy: Policy;
-  onToggleSeverity: () => void;
-  onChangeRule: (rule: string) => void;
-  onSave: (rule: string) => void;
-  onDelete: () => void;
-}
-
-const PolicyRow: React.FC<PolicyRowProps> = ({ policy, onToggleSeverity, onChangeRule, onSave, onDelete }) => {
-  const [hovered, setHovered] = useState(false);
-
-  const iconColor = policy.severity === 'block'
-    ? 'rgba(224,108,117,1)'
-    : 'rgba(255,179,71,1)';
-
-  return (
-    <div
-      style={{ display: 'flex', alignItems: 'center', gap: 8 }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      <button
-        onClick={onToggleSeverity}
-        title={`切換為 ${policy.severity === 'block' ? 'warn' : 'block'}`}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          padding: 0,
-          color: iconColor,
-          fontSize: 14,
-          flexShrink: 0,
-          lineHeight: 1,
-        }}
-      >
-        {policy.severity === 'block' ? '🛡' : '⚠'}
-      </button>
-      <input
-        type="text"
-        value={policy.rule}
-        onChange={(e) => onChangeRule(e.target.value)}
-        onBlur={(e) => onSave(e.target.value)}
-        placeholder="規則描述..."
-        style={{
-          flex: 1,
-          background: 'rgba(255,255,255,0.06)',
-          border: '1px solid rgba(255,255,255,0.1)',
-          borderRadius: 4,
-          color: TEXT_MAIN,
-          fontSize: 12,
-          padding: '4px 8px',
-          outline: 'none',
-          fontFamily: 'inherit',
-        }}
-      />
-      <button
-        onClick={onDelete}
-        style={{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          color: TEXT_MUTED,
-          fontSize: 14,
-          padding: 0,
-          lineHeight: 1,
-          opacity: hovered ? 1 : 0,
-          transition: 'opacity 150ms',
-          flexShrink: 0,
-        }}
-      >
-        ×
-      </button>
     </div>
   );
 };
@@ -688,65 +706,62 @@ const NotePanel: React.FC<NotePanelProps> = ({ note, flowPaths }) => {
 
 interface RemodelPanelProps {
   remodel: Remodel;
-  flowPaths: FlowPath[];
-  allBundles: Bundle[];
   allNotes: StickyNote[];
 }
 
-const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBundles, allNotes }) => {
-  const { updateRemodel } = useBoardStore();
+const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
+  const { updateRemodel, addNote } = useBoardStore();
 
   // Local state for sub-note fields
-  const [aggregateLabel, setAggregateLabel] = useState(remodel.aggregateNote.label);
-  const [aggregateContent, setAggregateContent] = useState(remodel.aggregateNote.content);
-  const [parameterLabel, setParameterLabel] = useState(remodel.parameterNote.label);
   const [parameterContent, setParameterContent] = useState(remodel.parameterNote.content);
-  const [queryLabel, setQueryLabel] = useState(remodel.queryNote.label);
   const [queryContent, setQueryContent] = useState(remodel.queryNote.content);
-  const [returnTypeLabel, setReturnTypeLabel] = useState(remodel.returnTypeNote.label);
   const [returnTypeContent, setReturnTypeContent] = useState(remodel.returnTypeNote.content);
   const [phase, setPhase] = useState(remodel.phase ?? '');
   const [notes, setNotes] = useState(remodel.notes ?? '');
 
-  // Linked bundles dropdown state
-  const [showBundleDropdown, setShowBundleDropdown] = useState(false);
-  const [bundleSearchQuery, setBundleSearchQuery] = useState('');
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  // Linked source events (formerly linkedBundleIds — now maps to DomainEvent note IDs)
+  const [showEventDropdown, setShowEventDropdown] = useState(false);
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const eventDropdownRef = useRef<HTMLDivElement>(null);
 
   // Linked DTOs dropdown state
   const [showDtoDropdown, setShowDtoDropdown] = useState(false);
   const [dtoSearchQuery, setDtoSearchQuery] = useState('');
   const dtosDropdownRef = useRef<HTMLDivElement>(null);
 
+  // Actor section state
+  const [showActorNameInput, setShowActorNameInput] = useState(false);
+  const [actorNameInput, setActorNameInput] = useState('');
+  const [showActorDropdown, setShowActorDropdown] = useState(false);
+  const actorDropdownRef = useRef<HTMLDivElement>(null);
+
   // Sync when switching between remodels
   useEffect(() => {
-    setAggregateLabel(remodel.aggregateNote.label);
-    setAggregateContent(remodel.aggregateNote.content);
-    setParameterLabel(remodel.parameterNote.label);
     setParameterContent(remodel.parameterNote.content);
-    setQueryLabel(remodel.queryNote.label);
     setQueryContent(remodel.queryNote.content);
-    setReturnTypeLabel(remodel.returnTypeNote.label);
     setReturnTypeContent(remodel.returnTypeNote.content);
     setPhase(remodel.phase ?? '');
     setNotes(remodel.notes ?? '');
-    setShowBundleDropdown(false);
-    setBundleSearchQuery('');
+    setShowEventDropdown(false);
+    setEventSearchQuery('');
     setShowDtoDropdown(false);
     setDtoSearchQuery('');
+    setShowActorNameInput(false);
+    setActorNameInput('');
+    setShowActorDropdown(false);
   }, [remodel.id]);
 
-  // Close bundle dropdown on outside click
+  // Close event dropdown on outside click
   useEffect(() => {
-    if (!showBundleDropdown) return;
+    if (!showEventDropdown) return;
     const handleOutsideClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setShowBundleDropdown(false);
+      if (eventDropdownRef.current && !eventDropdownRef.current.contains(e.target as Node)) {
+        setShowEventDropdown(false);
       }
     };
     document.addEventListener('mousedown', handleOutsideClick);
     return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [showBundleDropdown]);
+  }, [showEventDropdown]);
 
   // Close DTO dropdown on outside click
   useEffect(() => {
@@ -760,21 +775,29 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showDtoDropdown]);
 
-  const saveAggregateNote = useCallback(() => {
-    updateRemodel(remodel.id, { aggregateNote: { label: aggregateLabel, content: aggregateContent } });
-  }, [remodel.id, aggregateLabel, aggregateContent, updateRemodel]);
+  // Close actor dropdown on outside click
+  useEffect(() => {
+    if (!showActorDropdown) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (actorDropdownRef.current && !actorDropdownRef.current.contains(e.target as Node)) {
+        setShowActorDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showActorDropdown]);
 
   const saveParameterNote = useCallback(() => {
-    updateRemodel(remodel.id, { parameterNote: { label: parameterLabel, content: parameterContent } });
-  }, [remodel.id, parameterLabel, parameterContent, updateRemodel]);
+    updateRemodel(remodel.id, { parameterNote: { label: remodel.parameterNote.label, content: parameterContent } });
+  }, [remodel.id, remodel.parameterNote.label, parameterContent, updateRemodel]);
 
   const saveQueryNote = useCallback(() => {
-    updateRemodel(remodel.id, { queryNote: { label: queryLabel, content: queryContent } });
-  }, [remodel.id, queryLabel, queryContent, updateRemodel]);
+    updateRemodel(remodel.id, { queryNote: { label: remodel.queryNote.label, content: queryContent } });
+  }, [remodel.id, remodel.queryNote.label, queryContent, updateRemodel]);
 
   const saveReturnTypeNote = useCallback(() => {
-    updateRemodel(remodel.id, { returnTypeNote: { label: returnTypeLabel, content: returnTypeContent } });
-  }, [remodel.id, returnTypeLabel, returnTypeContent, updateRemodel]);
+    updateRemodel(remodel.id, { returnTypeNote: { label: remodel.returnTypeNote.label, content: returnTypeContent } });
+  }, [remodel.id, remodel.returnTypeNote.label, returnTypeContent, updateRemodel]);
 
   const saveMeta = useCallback(() => {
     updateRemodel(remodel.id, { phase });
@@ -784,42 +807,90 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     updateRemodel(remodel.id, { notes });
   }, [remodel.id, notes, updateRemodel]);
 
-  const togglePath = (pathId: string) => {
-    const current = remodel.paths ?? [];
-    const updated = current.includes(pathId)
-      ? current.filter((p) => p !== pathId)
-      : [...current, pathId];
-    updateRemodel(remodel.id, { paths: updated });
+  const createAndLinkDto = () => {
+    const newId = uuidv4();
+    const REMODEL_W = 496;
+    const newNote: StickyNote = {
+      id: newId,
+      type: 'Dto',
+      label: '[DtoName]\n----------\nfield: Type',
+      position: {
+        x: remodel.position.x + REMODEL_W + 20,
+        y: remodel.position.y,
+      },
+      size: { width: 200, height: 160 },
+      zIndex: 100,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    addNote(newNote);
+    if (!remodel.linkedDtoIds.includes(newId)) {
+      updateRemodel(remodel.id, { linkedDtoIds: [...remodel.linkedDtoIds, newId] });
+    }
   };
 
-  const removeBundleLink = (bundleId: string) => {
+  const removeEventLink = (noteId: string) => {
     updateRemodel(remodel.id, {
-      linkedBundleIds: remodel.linkedBundleIds.filter((id) => id !== bundleId),
+      linkedBundleIds: remodel.linkedBundleIds.filter((id) => id !== noteId),
     });
   };
 
-  const addBundleLink = (bundleId: string) => {
+  const addEventLink = (noteId: string) => {
+    if (remodel.linkedBundleIds.includes(noteId)) return;
     updateRemodel(remodel.id, {
-      linkedBundleIds: [...remodel.linkedBundleIds, bundleId],
+      linkedBundleIds: [...remodel.linkedBundleIds, noteId],
     });
-    setShowBundleDropdown(false);
-    setBundleSearchQuery('');
+    setShowEventDropdown(false);
+    setEventSearchQuery('');
   };
 
   const removeDtoLink = (dtoId: string) => {
-    updateRemodel(remodel.id, {
-      linkedDtoIds: remodel.linkedDtoIds.filter((id) => id !== dtoId),
-    });
+    updateRemodel(remodel.id, { linkedDtoIds: remodel.linkedDtoIds.filter((id) => id !== dtoId) });
   };
 
   const addDtoLink = (dtoId: string) => {
     if (remodel.linkedDtoIds.includes(dtoId)) return;
-    updateRemodel(remodel.id, {
-      linkedDtoIds: [...remodel.linkedDtoIds, dtoId],
-    });
+    updateRemodel(remodel.id, { linkedDtoIds: [...remodel.linkedDtoIds, dtoId] });
     setShowDtoDropdown(false);
     setDtoSearchQuery('');
   };
+
+  const createAndLinkActor = () => {
+    const name = actorNameInput.trim();
+    if (!name) return;
+    const newId = uuidv4();
+    const newNote: StickyNote = {
+      id: newId,
+      type: 'Actor',
+      label: name,
+      position: { x: remodel.position.x + 520, y: remodel.position.y },
+      size: { width: 120, height: 80 },
+      zIndex: 100,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    addNote(newNote);
+    updateRemodel(remodel.id, { linkedActorId: newId });
+    setShowActorNameInput(false);
+    setActorNameInput('');
+  };
+
+  const linkExistingActor = (actorId: string) => {
+    updateRemodel(remodel.id, { linkedActorId: actorId });
+    setShowActorDropdown(false);
+  };
+
+  const unlinkActor = () => {
+    updateRemodel(remodel.id, { linkedActorId: undefined });
+  };
+
+  // All DomainEvent notes on the board
+  const allEventNotes = allNotes.filter((n) => n.type === 'DomainEvent');
+  const availableEvents = allEventNotes.filter((n) => !remodel.linkedBundleIds.includes(n.id));
+  const filteredAvailableEvents = availableEvents.filter((n) => {
+    const q = eventSearchQuery.toLowerCase();
+    return n.label.toLowerCase().includes(q);
+  });
 
   // All Dto notes on the board
   const allDtoNotes = allNotes.filter((n) => n.type === 'Dto');
@@ -829,143 +900,76 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
     return n.label.toLowerCase().includes(q);
   });
 
-  // Universe status computed values
-  const universe = isUniverseRemodel(remodel, allBundles);
-  const linkedBundles = allBundles.filter((b) => remodel.linkedBundleIds.includes(b.id));
-  const aggregateNames = [...new Set(
-    linkedBundles.map((b) => b.infoNote.label.trim()).filter((l) => l.length > 0)
-  )];
-
-  // Bundles available to link (not yet linked)
-  const availableBundles = allBundles.filter((b) => !remodel.linkedBundleIds.includes(b.id));
-  const filteredAvailableBundles = availableBundles.filter((b) => {
-    const q = bundleSearchQuery.toLowerCase();
-    return (
-      b.infoNote.label.toLowerCase().includes(q) ||
-      b.commandNote.label.toLowerCase().includes(q) ||
-      b.eventNote.label.toLowerCase().includes(q)
-    );
-  });
-
-  const remodelPaths = remodel.paths ?? [];
+  const allActorNotes = allNotes.filter((n) => n.type === 'Actor' && n.id !== remodel.linkedActorId);
+  const linkedActor = remodel.linkedActorId
+    ? allNotes.find((n) => n.id === remodel.linkedActorId)
+    : undefined;
 
   return (
     <div style={{ padding: '0 16px 24px' }}>
-      {/* Universe badge (if applicable) */}
-      {universe && (
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          background: 'rgba(124,58,237,0.15)',
-          border: '1px solid rgba(124,58,237,0.4)',
-          borderRadius: 6,
-          padding: '4px 10px',
-          marginBottom: 20,
-        }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>∪ Universe Remodel</span>
-        </div>
-      )}
-
-      {/* AGGREGATE section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Aggregate</SectionLabel>
-        <InlineField
-          label="Aggregate name"
-          value={aggregateLabel}
-          placeholder="Aggregate name"
-          onChange={setAggregateLabel}
-          onBlur={saveAggregateNote}
-        />
-        <InlineField
-          label="Description"
-          value={aggregateContent}
-          placeholder="Description..."
-          onChange={setAggregateContent}
-          onBlur={saveAggregateNote}
-          multiline
-        />
-      </div>
-
-      {/* PARAMETERS section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Parameters</SectionLabel>
-        <InlineField
-          label="Parameter name"
-          value={parameterLabel}
-          placeholder="Parameter name"
-          onChange={setParameterLabel}
-          onBlur={saveParameterNote}
-        />
-        <InlineField
-          label="Details"
-          value={parameterContent}
-          placeholder="Parameter details..."
-          onChange={setParameterContent}
-          onBlur={saveParameterNote}
-          multiline
-        />
-      </div>
-
-      {/* QUERY NAME section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Query Name</SectionLabel>
-        <InlineField
-          label="Query name"
-          value={queryLabel}
-          placeholder="e.g. GetOrderList"
-          onChange={setQueryLabel}
+      {/* Editable color blocks */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gap: 6,
+        marginBottom: 20,
+      }}>
+        <EditableColorBlock
+          sectionLabel="Query"
+          labelValue={remodel.queryNote.label}
+          contentValue={queryContent}
+          labelPlaceholder="e.g. GetOrderList"
+          contentPlaceholder="Query description..."
+          bgColor="#bfdbfe"
+          textColor="#1e293b"
+          noLabelInput
+          onLabelChange={() => {}}
+          onContentChange={setQueryContent}
           onBlur={saveQueryNote}
         />
-        <InlineField
-          label="Description"
-          value={queryContent}
-          placeholder="Query description..."
-          onChange={setQueryContent}
-          onBlur={saveQueryNote}
-          multiline
-        />
-      </div>
-
-      {/* RETURN TYPE section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Return Type</SectionLabel>
-        <InlineField
-          label="Return type name"
-          value={returnTypeLabel}
-          placeholder="Return type name"
-          onChange={setReturnTypeLabel}
+        <EditableColorBlock
+          sectionLabel="Return Type"
+          labelValue={remodel.returnTypeNote.label}
+          contentValue={returnTypeContent}
+          labelPlaceholder="Return type name"
+          contentPlaceholder="Return type description..."
+          bgColor="#bbf7d0"
+          textColor="#1e293b"
+          noLabelInput
+          onLabelChange={() => {}}
+          onContentChange={setReturnTypeContent}
           onBlur={saveReturnTypeNote}
         />
-        <InlineField
-          label="Details"
-          value={returnTypeContent}
-          placeholder="Return type description..."
-          onChange={setReturnTypeContent}
-          onBlur={saveReturnTypeNote}
-          multiline
+        <EditableColorBlock
+          sectionLabel="Parameters"
+          labelValue={remodel.parameterNote.label}
+          contentValue={parameterContent}
+          labelPlaceholder="Parameter name"
+          contentPlaceholder="Parameter details..."
+          bgColor="#bbf7d0"
+          textColor="#1e293b"
+          fullWidth
+          noLabelInput
+          onLabelChange={() => {}}
+          onContentChange={setParameterContent}
+          onBlur={saveParameterNote}
         />
       </div>
 
       {/* Divider */}
       <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 20 }} />
 
-      {/* LINKED BUNDLES section */}
+      {/* LINKED SOURCE EVENTS section */}
       <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Linked Bundles</SectionLabel>
+        <SectionLabel>Source Events</SectionLabel>
 
-        {/* Existing linked bundles as chips */}
+        {/* Existing linked event chips */}
         {remodel.linkedBundleIds.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
             {remodel.linkedBundleIds.map((linkedId) => {
-              const linkedBundle = allBundles.find((b) => b.id === linkedId);
-              const isDeleted = !linkedBundle;
-              const displayLabel = linkedBundle
-                ? (linkedBundle.infoNote.label || linkedBundle.commandNote.label || '(Unnamed Bundle)')
-                : '(Deleted Bundle)';
-              const subLabel = linkedBundle
-                ? (linkedBundle.commandNote.label ? ` — ${linkedBundle.commandNote.label}` : '')
-                : '';
+              const linkedEvent = allNotes.find((n) => n.id === linkedId);
+              const isDeleted = !linkedEvent;
+              const displayLabel = linkedEvent ? (linkedEvent.label || '(Unnamed Event)') : '(Deleted Event)';
 
               return (
                 <div
@@ -974,15 +978,15 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    background: isDeleted ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
-                    border: `1px solid ${isDeleted ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.1)'}`,
+                    background: isDeleted ? 'rgba(255,255,255,0.03)' : 'rgba(255,140,0,0.1)',
+                    border: `1px solid ${isDeleted ? 'rgba(255,255,255,0.06)' : 'rgba(255,140,0,0.25)'}`,
                     borderRadius: 6,
                     padding: '6px 10px',
                   }}
                 >
                   <span style={{
                     fontSize: 12,
-                    color: isDeleted ? TEXT_MUTED : TEXT_MAIN,
+                    color: isDeleted ? TEXT_MUTED : '#fb923c',
                     fontStyle: isDeleted ? 'italic' : 'normal',
                     flex: 1,
                     minWidth: 0,
@@ -991,11 +995,10 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
                     whiteSpace: 'nowrap',
                   }}>
                     {displayLabel}
-                    {subLabel && <span style={{ color: TEXT_MUTED }}>{subLabel}</span>}
                   </span>
                   <button
-                    onClick={() => removeBundleLink(linkedId)}
-                    title={isDeleted ? '清理此連結' : '移除連結'}
+                    onClick={() => removeEventLink(linkedId)}
+                    title={isDeleted ? 'Clean up link' : 'Remove link'}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -1015,10 +1018,10 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
           </div>
         )}
 
-        {/* Add Bundle dropdown */}
-        <div ref={dropdownRef} style={{ position: 'relative' }}>
+        {/* Add Event dropdown */}
+        <div ref={eventDropdownRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setShowBundleDropdown((v) => !v)}
+            onClick={() => setShowEventDropdown((v) => !v)}
             style={{
               background: 'none',
               border: '1px dashed rgba(255,255,255,0.2)',
@@ -1029,12 +1032,13 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
               padding: '5px 10px',
               width: '100%',
               textAlign: 'left',
+              fontFamily: 'inherit',
             }}
           >
-            + Add Bundle
+            + Add Source Event
           </button>
 
-          {showBundleDropdown && (
+          {showEventDropdown && (
             <div style={{
               position: 'absolute',
               top: '100%',
@@ -1048,14 +1052,13 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
               zIndex: 100,
               overflow: 'hidden',
             }}>
-              {/* Search input */}
               <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                 <input
                   autoFocus
                   type="text"
-                  value={bundleSearchQuery}
-                  onChange={(e) => setBundleSearchQuery(e.target.value)}
-                  placeholder="Search bundles..."
+                  value={eventSearchQuery}
+                  onChange={(e) => setEventSearchQuery(e.target.value)}
+                  placeholder="Search events..."
                   style={{
                     width: '100%',
                     background: 'rgba(255,255,255,0.06)',
@@ -1070,21 +1073,147 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
                   }}
                 />
               </div>
-
-              {/* Bundle options */}
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                {filteredAvailableBundles.length === 0 ? (
+                {filteredAvailableEvents.length === 0 ? (
                   <div style={{ padding: '8px 12px', fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-                    {availableBundles.length === 0 ? 'No bundles available' : 'No matching bundles'}
+                    {availableEvents.length === 0 ? 'No events available' : 'No matching events'}
                   </div>
                 ) : (
-                  filteredAvailableBundles.map((b) => {
-                    const displayLabel = b.infoNote.label || b.commandNote.label || '(Unnamed Bundle)';
-                    const subLabel = b.commandNote.label && b.infoNote.label ? ` — ${b.commandNote.label}` : '';
+                  filteredAvailableEvents.map((n) => (
+                    <button
+                      key={n.id}
+                      onClick={() => addEventLink(n.id)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: TEXT_MAIN,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                    >
+                      {n.label || '(Unnamed Event)'}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* LINKED DTOS section */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            color: TEXT_MUTED,
+          }}>
+            Linked DTOs
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              onClick={createAndLinkDto}
+              title="Create new DTO"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 4,
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 0,
+              }}
+            >
+              +
+            </button>
+            <button
+              onClick={() => setShowDtoDropdown((v) => !v)}
+              title="Link existing DTO"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 4,
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 0,
+              }}
+            >
+              ⇌
+            </button>
+          </div>
+        </div>
+
+        <div ref={dtosDropdownRef} style={{ position: 'relative' }}>
+          {showDtoDropdown && (
+            <div style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              marginTop: 4,
+              background: '#1e293b',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 8,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+              zIndex: 100,
+              overflow: 'hidden',
+            }}>
+              <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={dtoSearchQuery}
+                  onChange={(e) => setDtoSearchQuery(e.target.value)}
+                  placeholder="Search DTOs..."
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: 4,
+                    color: TEXT_MAIN,
+                    fontSize: 12,
+                    padding: '4px 8px',
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                {filteredAvailableDtos.length === 0 ? (
+                  <div style={{ padding: '8px 12px', fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
+                    {availableDtoNotes.length === 0 ? 'No DTOs on this board' : 'No matching DTOs'}
+                  </div>
+                ) : (
+                  filteredAvailableDtos.map((dto) => {
+                    const firstLine = dto.label.split('\n')[0].trim() || '(Unnamed DTO)';
                     return (
                       <button
-                        key={b.id}
-                        onClick={() => addBundleLink(b.id)}
+                        key={dto.id}
+                        onClick={() => addDtoLink(dto.id)}
                         style={{
                           display: 'block',
                           width: '100%',
@@ -1095,13 +1224,12 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
                           color: TEXT_MAIN,
                           fontSize: 12,
                           cursor: 'pointer',
-                          fontFamily: 'inherit',
+                          fontFamily: '"Courier New", Courier, monospace',
                         }}
                         onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
                         onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
                       >
-                        {displayLabel}
-                        {subLabel && <span style={{ color: TEXT_MUTED }}>{subLabel}</span>}
+                        {firstLine}
                       </button>
                     );
                   })
@@ -1110,38 +1238,6 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
             </div>
           )}
         </div>
-      </div>
-
-      {/* UNIVERSE STATUS section */}
-      {remodel.linkedBundleIds.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          {universe ? (
-            <div style={{
-              background: 'rgba(124,58,237,0.1)',
-              border: '1px solid rgba(124,58,237,0.3)',
-              borderRadius: 6,
-              padding: '8px 10px',
-            }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa', marginBottom: 4 }}>
-                ∪ Universe Remodel
-              </div>
-              <div style={{ fontSize: 11, color: '#94a3b8' }}>
-                Crosses: {aggregateNames.join(', ')}
-              </div>
-            </div>
-          ) : (
-            <div style={{ fontSize: 11, color: '#94a3b8' }}>
-              {aggregateNames.length > 0
-                ? `Single Aggregate: ${aggregateNames[0]}`
-                : 'Aggregate not set on linked bundle'}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* LINKED DTOS section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Linked DTOs</SectionLabel>
 
         {/* Existing linked DTOs as chips */}
         {remodel.linkedDtoIds.length > 0 && (
@@ -1149,9 +1245,8 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
             {remodel.linkedDtoIds.map((linkedId) => {
               const linkedDto = allDtoNotes.find((n) => n.id === linkedId);
               const isDeleted = !linkedDto;
-              const rawLabel = linkedDto ? linkedDto.label : '';
               const displayLabel = linkedDto
-                ? (rawLabel.split('\n')[0].trim() || '(Unnamed DTO)')
+                ? (linkedDto.label.split('\n')[0].trim() || '(Unnamed DTO)')
                 : '(Deleted DTO)';
 
               return (
@@ -1201,30 +1296,132 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
             })}
           </div>
         )}
+      </div>
 
-        {/* Add DTO dropdown */}
-        <div ref={dtosDropdownRef} style={{ position: 'relative' }}>
-          <button
-            onClick={() => setShowDtoDropdown((v) => !v)}
-            style={{
-              background: 'none',
-              border: '1px dashed rgba(134,239,172,0.25)',
-              borderRadius: 4,
-              color: TEXT_MUTED,
-              cursor: 'pointer',
-              fontSize: 12,
-              padding: '5px 10px',
-              width: '100%',
-              textAlign: 'left',
-            }}
-          >
-            + Link DTO
-          </button>
+      {/* ACTOR section */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <div style={{
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            color: TEXT_MUTED,
+          }}>
+            Actor
+          </div>
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              onClick={() => { setShowActorNameInput((v) => !v); setShowActorDropdown(false); }}
+              title="Create new Actor"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 4,
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 0,
+              }}
+            >
+              +
+            </button>
+            <button
+              onClick={() => { setShowActorDropdown((v) => !v); setShowActorNameInput(false); setActorNameInput(''); }}
+              title="Link existing Actor"
+              style={{
+                width: 20,
+                height: 20,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 4,
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                lineHeight: 1,
+                padding: 0,
+              }}
+            >
+              ⇌
+            </button>
+          </div>
+        </div>
 
-          {showDtoDropdown && (
+        {/* Inline actor name input */}
+        {showActorNameInput && (
+          <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+            <input
+              autoFocus
+              type="text"
+              value={actorNameInput}
+              onChange={(e) => setActorNameInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') createAndLinkActor();
+                if (e.key === 'Escape') { setShowActorNameInput(false); setActorNameInput(''); }
+              }}
+              placeholder="Actor name..."
+              style={{
+                flex: 1,
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 4,
+                color: TEXT_MAIN,
+                fontSize: 12,
+                padding: '4px 8px',
+                outline: 'none',
+                fontFamily: 'inherit',
+              }}
+            />
+            <button
+              onClick={createAndLinkActor}
+              title="Confirm"
+              style={{
+                background: 'rgba(255,255,255,0.08)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 4,
+                color: TEXT_MAIN,
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '4px 6px',
+                lineHeight: 1,
+              }}
+            >
+              ✓
+            </button>
+            <button
+              onClick={() => { setShowActorNameInput(false); setActorNameInput(''); }}
+              title="Cancel"
+              style={{
+                background: 'none',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 4,
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '4px 6px',
+                lineHeight: 1,
+              }}
+            >
+              ✗
+            </button>
+          </div>
+        )}
+
+        {/* Link existing actor dropdown */}
+        <div ref={actorDropdownRef} style={{ position: 'relative' }}>
+          {showActorDropdown && (
             <div style={{
               position: 'absolute',
-              top: '100%',
+              top: 0,
               left: 0,
               right: 0,
               marginTop: 4,
@@ -1235,112 +1432,79 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, flowPaths, allBund
               zIndex: 100,
               overflow: 'hidden',
             }}>
-              {/* Search input */}
-              <div style={{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                <input
-                  autoFocus
-                  type="text"
-                  value={dtoSearchQuery}
-                  onChange={(e) => setDtoSearchQuery(e.target.value)}
-                  placeholder="Search DTOs..."
-                  style={{
-                    width: '100%',
-                    background: 'rgba(255,255,255,0.06)',
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 4,
-                    color: TEXT_MAIN,
-                    fontSize: 12,
-                    padding: '4px 8px',
-                    outline: 'none',
-                    fontFamily: 'inherit',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              {/* DTO options */}
               <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                {filteredAvailableDtos.length === 0 ? (
+                {allActorNotes.length === 0 ? (
                   <div style={{ padding: '8px 12px', fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-                    {availableDtoNotes.length === 0 ? 'No DTOs on this board' : 'No matching DTOs'}
+                    No Actor notes on this board
                   </div>
                 ) : (
-                  filteredAvailableDtos.map((dto) => {
-                    const firstLine = dto.label.split('\n')[0].trim() || '(Unnamed DTO)';
-                    return (
-                      <button
-                        key={dto.id}
-                        onClick={() => addDtoLink(dto.id)}
-                        style={{
-                          display: 'block',
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: '8px 12px',
-                          background: 'none',
-                          border: 'none',
-                          color: TEXT_MAIN,
-                          fontSize: 12,
-                          cursor: 'pointer',
-                          fontFamily: '"Courier New", Courier, monospace',
-                        }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
-                      >
-                        {firstLine}
-                      </button>
-                    );
-                  })
+                  allActorNotes.map((actor) => (
+                    <button
+                      key={actor.id}
+                      onClick={() => linkExistingActor(actor.id)}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '8px 12px',
+                        background: 'none',
+                        border: 'none',
+                        color: TEXT_MAIN,
+                        fontSize: 12,
+                        cursor: 'pointer',
+                        fontFamily: 'inherit',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                    >
+                      {actor.label || '(Unnamed Actor)'}
+                    </button>
+                  ))
                 )}
               </div>
             </div>
           )}
         </div>
-      </div>
 
-      {/* Divider */}
-      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 20 }} />
-
-      {/* PATHS section */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionLabel>Paths</SectionLabel>
-        {flowPaths.length === 0 ? (
-          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-            尚未建立任何 Path
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {flowPaths.map((fp) => {
-              const checked = remodelPaths.includes(fp.id);
-              return (
-                <label
-                  key={fp.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    color: checked ? TEXT_MAIN : TEXT_DIM,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => togglePath(fp.id)}
-                    style={{ accentColor: fp.color, width: 14, height: 14 }}
-                  />
-                  <span
-                    style={{
-                      width: 8,
-                      height: 8,
-                      borderRadius: '50%',
-                      backgroundColor: fp.color,
-                      flexShrink: 0,
-                    }}
-                  />
-                  <span style={{ fontSize: 13 }}>{fp.name}</span>
-                </label>
-              );
-            })}
+        {/* Linked actor chip */}
+        {remodel.linkedActorId && (
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            background: linkedActor ? 'rgba(251,191,36,0.1)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${linkedActor ? 'rgba(251,191,36,0.25)' : 'rgba(255,255,255,0.06)'}`,
+            borderRadius: 6,
+            padding: '6px 10px',
+          }}>
+            <span style={{
+              fontSize: 12,
+              color: linkedActor ? '#fbbf24' : TEXT_MUTED,
+              fontStyle: linkedActor ? 'normal' : 'italic',
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {linkedActor ? (linkedActor.label || '(Unnamed Actor)') : '(Deleted Actor)'}
+            </span>
+            <button
+              onClick={unlinkActor}
+              title="Remove actor link"
+              style={{
+                background: 'none',
+                border: 'none',
+                color: TEXT_MUTED,
+                cursor: 'pointer',
+                fontSize: 14,
+                padding: '0 0 0 8px',
+                lineHeight: 1,
+                flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
           </div>
         )}
       </div>
@@ -1408,10 +1572,6 @@ export const DetailPanel: React.FC = () => {
   }, [isOpen, setSelectedElement]);
 
   // Find the selected element
-  const bundle = selectedElementType === 'bundle'
-    ? activeBoard.bundles.find((b) => b.id === selectedElementId) ?? null
-    : null;
-
   const note = selectedElementType === 'note'
     ? activeBoard.notes.find((n) => n.id === selectedElementId) ?? null
     : null;
@@ -1422,25 +1582,21 @@ export const DetailPanel: React.FC = () => {
 
   // If element no longer exists (deleted), close the panel
   useEffect(() => {
-    if (isOpen && !bundle && !note && !remodel) {
+    if (isOpen && !note && !remodel) {
       setSelectedElement(null, null);
     }
-  }, [isOpen, bundle, note, remodel, setSelectedElement]);
+  }, [isOpen, note, remodel, setSelectedElement]);
 
-  const title = bundle
-    ? (bundle.eventNote.label || 'Bundle')
-    : note
+  const title = note
     ? (note.label || note.type)
     : remodel
-    ? (remodel.queryNote.label || remodel.aggregateNote.label || 'Remodel')
+    ? (remodel.queryNote.label || remodel.aggregateNote.label || 'Read Model')
     : '';
 
-  const subtitle = bundle
-    ? `bundle · ${bundle.id.slice(0, 6)}`
-    : note
+  const subtitle = note
     ? `${note.type} · ${note.id.slice(0, 6)}`
     : remodel
-    ? `remodel · ${remodel.id.slice(0, 6)}`
+    ? `read model · ${remodel.id.slice(0, 6)}`
     : '';
 
   return (
@@ -1508,13 +1664,19 @@ export const DetailPanel: React.FC = () => {
 
       {/* Body */}
       <div style={{ flex: 1, paddingTop: 16 }}>
-        {bundle && <BundlePanel bundle={bundle} flowPaths={activeBoard.flowPaths} />}
-        {note && <NotePanel note={note} flowPaths={activeBoard.flowPaths} />}
+        {note && note.type === 'DomainEvent' && (
+          <DomainEventPanel
+            note={note}
+            allNotes={activeBoard.notes}
+            flowPaths={activeBoard.flowPaths}
+          />
+        )}
+        {note && note.type !== 'DomainEvent' && (
+          <NotePanel note={note} flowPaths={activeBoard.flowPaths} />
+        )}
         {remodel && (
           <RemodelPanel
             remodel={remodel}
-            flowPaths={activeBoard.flowPaths}
-            allBundles={activeBoard.bundles}
             allNotes={activeBoard.notes}
           />
         )}

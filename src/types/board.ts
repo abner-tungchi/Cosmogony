@@ -1,11 +1,10 @@
-import type { StickyNote, Bundle, Link, FlowPath, Remodel } from './elements';
+import type { StickyNote, Link, FlowPath, Remodel, Property } from './elements';
 
 export interface Board {
   id: string;
   name: string;
   parentContextId?: string;   // if set, this is an actor sub-board inside a context
   notes: StickyNote[];
-  bundles: Bundle[];
   remodels: Remodel[];
   links: Link[];
   flowPaths: FlowPath[];
@@ -32,7 +31,7 @@ export interface UIState {
   isDraggingCanvas: boolean;
   isLinkingMode: boolean;
   linkFromId: string | null;
-  linkFromType: 'note' | 'bundle' | 'remodel' | null;
+  linkFromType: 'note' | 'remodel' | null;
 }
 
 export interface BoardStore {
@@ -45,10 +44,10 @@ export interface BoardStore {
   setProjectName: (name: string) => void;
   setBoardName: (name: string) => void; // legacy alias
   addBoard: (name: string) => string;   // creates + opens, returns new board id
-  addActorBoard: (contextId: string, name: string) => string; // creates actor sub-board under a context
-  deleteBoard: (id: string) => void;    // permanent delete from project
-  closeBoard: (id: string) => void;     // remove from openBoardIds, keep in project
-  openBoard: (id: string) => void;      // add to openBoardIds, set active
+  addActorBoard: (contextId: string, name: string) => string;
+  deleteBoard: (id: string) => void;
+  closeBoard: (id: string) => void;
+  openBoard: (id: string) => void;
   setActiveBoard: (id: string) => void;
   renameBoard: (id: string, name: string) => void;
 
@@ -56,15 +55,15 @@ export interface BoardStore {
   addNote: (note: StickyNote) => void;
   updateNote: (id: string, updates: Partial<StickyNote>) => void;
   deleteNote: (id: string) => void;
-  addBundle: (bundle: Bundle) => void;
-  updateBundle: (id: string, updates: Partial<Bundle>) => void;
-  deleteBundle: (id: string) => void;
   addLink: (link: Link) => void;
   deleteLink: (id: string) => void;
   clearBoard: () => void;
-  expandNoteToBundle: (noteId: string) => void;
-  collapseAllBundles: () => void;
-  expandAllBundles: () => void;
+
+  // DomainEvent-centric actions
+  addCommandForEvent: (eventNoteId: string, commandLabel: string, information: Property[]) => void;
+  updateCommandInformation: (commandId: string, information: Property[]) => void;
+  updateEventProperties: (eventId: string, eventProperties: Property[]) => void;
+  linkEntityToEvent: (eventId: string, entityId: string | undefined) => void;
 
   // Remodel management (active board)
   addRemodel: (remodel: Remodel) => void;

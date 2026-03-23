@@ -5,19 +5,33 @@ This guide defines the semantics, layout conventions, and recommended workflow f
 
 ---
 
-## Bundle Semantics (4-in-1 card)
+## Core Concepts
 
-Each **Bundle** represents one step in the domain flow and contains 4 sub-notes:
+### DomainEvent-Centric Design
 
-| Sub-note | Color | Field | Meaning |
-|----------|-------|-------|---------|
-| `infoNote` | Yellow (top-center) | Entity | The **Aggregate Root** — the domain object being acted upon |
-| `entityNote` | Green (bottom-left) | Params | **Command Parameters** — the inputs required to execute the command |
-| `commandNote` | Blue (bottom-center) | Command | The **Command** — the user or system's intent (imperative verb phrase) |
-| `eventNote` | Orange (bottom-right) | Domain Event | The **Domain Event** — the fact that occurred (past tense) |
+The board is built around **DomainEvents** as first-class citizens. Each domain step consists of:
 
-**Standard flow within a Bundle:**
-> Actor triggers **Command** → with **Params** → acts on **Entity** → produces **Domain Event**
+1. A **Command** note (blue) — the user or system's intent (imperative verb phrase)
+2. A **DomainEvent** note (orange) — the fact that occurred (past tense), linked to its Command
+
+Each DomainEvent can also be linked to:
+- An **Aggregate** note (yellow) — the domain entity being acted upon (`entityId`)
+- A **Command** note — auto-created via `es_add_command_for_event` (`commandId`)
+
+**Standard flow:**
+> Actor → Command → DomainEvent → (next Command via Policy or direct link)
+
+### Property Schema
+
+Commands carry `information: Property[]` — the input parameters required to execute the command.
+DomainEvents carry `eventProperties: Property[]` — the output data emitted by the event.
+
+```typescript
+interface Property {
+  attrName: string;  // e.g. "userId", "orderId"
+  type: string;      // e.g. "string", "UUID", "number"
+}
+```
 
 ---
 
@@ -30,9 +44,9 @@ Each **Bundle** represents one step in the domain flow and contains 4 sub-notes:
 | `ReadModel` | Green sticky | A data projection that Actors use to make decisions |
 | `ExternalSystem` | Pink sticky | An external service or third-party integration |
 | `Hotspot` | Red sticky | A problem, question, or area of uncertainty |
-| `DomainEvent` | Orange sticky | A standalone event outside a Bundle |
-| `Command` | Blue sticky | A standalone command outside a Bundle |
-| `Aggregate` | Yellow sticky | A standalone aggregate / entity |
+| `DomainEvent` | Orange sticky | A domain event (produced by a Command) |
+| `Command` | Blue sticky | A command (triggers a Domain Event) |
+| `Aggregate` | Yellow sticky | A domain entity / aggregate root |
 
 ---
 
@@ -40,15 +54,16 @@ Each **Bundle** represents one step in the domain flow and contains 4 sub-notes:
 
 ```
 Y=60–120   : Actors (above the main flow)
-Y=200      : Main flow Bundles (left → right, horizontal)
+Y=200      : Command notes (left of each pair)
+Y=200      : DomainEvent notes (right of each Command, x+160)
 Y=480–520  : Policies and Read Models (below the main flow)
 ```
 
-- **Bundle size**: 496 × 248 px
-- **Horizontal spacing between Bundles**: 736 px (= 496 width + 240 gap)
-- **First bundle start**: x=80 (when board is empty)
-- Actor notes are placed above the Bundle they trigger (same X, Y≈80)
-- Policy notes go below the Domain Event they react to
+- **Note size**: ~160 × 160 px
+- **Horizontal spacing between Command+Event pairs**: ~400 px
+- **First pair start**: x=80 (when board is empty)
+- Actor notes are placed above the Command they trigger (same X, Y≈80)
+- Policy notes go below the DomainEvent they react to
 - ReadModel notes go below the Command they inform
 
 ---
@@ -57,7 +72,7 @@ Y=480–520  : Policies and Read Models (below the main flow)
 
 ### Step 1 — Orient
 ```
-es_get_project        → See all contexts and their sizes
+es_get_project        → See all contexts and their sizes (domainEventCount, commandCount)
 es_list_contexts      → Confirm active context
 ```
 
@@ -66,28 +81,37 @@ es_list_contexts      → Confirm active context
 es_create_context     → Create a new Bounded Context if needed
 es_switch_context     → Switch to the target context
 es_get_board          → Read current board state before editing
+                        DomainEvent notes include _commandLabel and _entityLabel annotations
 ```
 
 ### Step 3 — Build the happy path
 ```
-es_add_flow           → Create all main-flow Bundles at once (recommended)
-                        autoLink=true creates arrows between consecutive Bundles
+es_add_flow           → Create all main-flow Command+Event pairs at once (recommended)
+                        autoLink=true creates arrows between consecutive pairs (Event[i] → Command[i+1])
 ```
 Or incrementally:
 ```
-es_add_bundle         → Add one Bundle (omit x/y for auto-layout)
+es_add_note (DomainEvent)          → Add a standalone DomainEvent
+es_add_command_for_event(eventId)  → Add a Command linked to that DomainEvent
 ```
 
-### Step 4 — Add context elements
+### Step 4 — Enrich with schemas
 ```
-es_add_note (Actor)       → Place above the first Bundle they trigger
-es_add_note (Policy)      → Place below the Domain Event that triggers it
+es_update_command_information(commandId, information[])     → Set Command input parameters
+es_update_event_properties(eventId, eventProperties[])     → Set DomainEvent output properties
+es_link_entity_to_event(eventId, aggregateId)              → Link an Aggregate to a DomainEvent
+```
+
+### Step 5 — Add context elements
+```
+es_add_note (Actor)       → Place above the first Command they trigger
+es_add_note (Policy)      → Place below the DomainEvent that triggers it
 es_add_note (ReadModel)   → Place below the Command it informs
 ```
 
-### Step 5 — Link everything
+### Step 6 — Link everything
 ```
-es_add_link           → Connect Actor → Bundle, Policy → Bundle, Bundle → ReadModel
+es_add_link           → Connect Actor → Command, Policy → Command, DomainEvent → ReadModel
 ```
 
 ---
@@ -108,26 +132,65 @@ es_add_link           → Connect Actor → Bundle, Policy → Bundle, Bundle �
 es_add_flow({
   steps: [
     {
-      infoLabel: "AuditRequest",    infoContent: "Audit request entity",
-      entityLabel: "Params",        entityContent: "auditType, targetId, requesterId",
       commandLabel: "Submit Audit Request",
-      eventLabel: "Audit Request Submitted"
+      eventLabel: "Audit Request Submitted",
+      information: [
+        { attrName: "auditType", type: "string" },
+        { attrName: "targetId", type: "UUID" },
+        { attrName: "requesterId", type: "UUID" }
+      ],
+      eventProperties: [
+        { attrName: "auditRequestId", type: "UUID" },
+        { attrName: "status", type: "string" }
+      ]
     },
     {
-      infoLabel: "AuditCase",       infoContent: "Audit case aggregate",
-      entityLabel: "Params",        entityContent: "auditorId, priority",
       commandLabel: "Assign Auditor",
-      eventLabel: "Auditor Assigned"
+      eventLabel: "Auditor Assigned",
+      information: [
+        { attrName: "auditorId", type: "UUID" },
+        { attrName: "priority", type: "string" }
+      ],
+      eventProperties: [
+        { attrName: "auditCaseId", type: "UUID" },
+        { attrName: "assignedAt", type: "timestamp" }
+      ]
     },
     {
-      infoLabel: "AuditCase",       infoContent: "Audit in progress",
-      entityLabel: "Params",        entityContent: "findings, conclusion",
       commandLabel: "Complete Audit",
-      eventLabel: "Audit Completed"
+      eventLabel: "Audit Completed",
+      information: [
+        { attrName: "findings", type: "string" },
+        { attrName: "conclusion", type: "string" }
+      ],
+      eventProperties: [
+        { attrName: "completedAt", type: "timestamp" },
+        { attrName: "result", type: "string" }
+      ]
     }
   ],
   autoLink: true
 })
 ```
 
-Then add Actors above step 1, Policy below step 3's event, ReadModel below step 2's command.
+Then:
+1. Add Aggregate notes and link to each DomainEvent via `es_link_entity_to_event`
+2. Add Actor notes above step 1's Command
+3. Add Policy notes below the DomainEvents that trigger reactions
+4. Add ReadModel notes below the Commands they inform
+
+---
+
+## Key Tool Reference
+
+| Tool | Purpose |
+|------|---------|
+| `es_add_flow` | Batch-create Command+Event pairs for the happy path |
+| `es_add_note` | Add any standalone note (Actor, Policy, ReadModel, Aggregate, etc.) |
+| `es_add_command_for_event` | Add a Command linked to an existing DomainEvent |
+| `es_update_command_information` | Set/update a Command's input property schema |
+| `es_update_event_properties` | Set/update a DomainEvent's output property schema |
+| `es_link_entity_to_event` | Link an Aggregate to a DomainEvent (pass "" to unlink) |
+| `es_add_link` | Draw an arrow between any two notes |
+| `es_get_board` | Read board state (DomainEvents annotated with `_commandLabel`, `_entityLabel`) |
+| `es_get_project` | Overview of all contexts with `domainEventCount` and `commandCount` |

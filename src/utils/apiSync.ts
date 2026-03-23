@@ -36,10 +36,10 @@ export function useApiSync() {
       .then((serverProject: Project) => {
         // Only replace local state if server has richer data
         const serverTotal = serverProject.boards?.reduce(
-          (acc, b) => acc + b.notes.length + b.bundles.length, 0
+          (acc, b) => acc + b.notes.length, 0
         ) ?? 0;
         const localTotal = project.boards?.reduce(
-          (acc, b) => acc + b.notes.length + b.bundles.length, 0
+          (acc, b) => acc + b.notes.length, 0
         ) ?? 0;
         if (serverTotal > localTotal) {
           store.loadProject(serverProject);
@@ -107,14 +107,27 @@ function dispatch(action: string, payload: unknown, store: BoardStore) {
     case 'delete_note':
       store.deleteNote(p.id as string);
       break;
-    case 'add_bundle':
-      store.addBundle(p as unknown as Parameters<BoardStore['addBundle']>[0]);
+    case 'add_command_for_event':
+      store.addCommandForEvent(
+        p.eventNoteId as string,
+        p.commandLabel as string,
+        (p.information ?? []) as Parameters<BoardStore['addCommandForEvent']>[2]
+      );
       break;
-    case 'update_bundle':
-      store.updateBundle(p.id as string, p as unknown as Parameters<BoardStore['updateBundle']>[1]);
+    case 'update_command_information':
+      store.updateCommandInformation(
+        p.commandId as string,
+        (p.information ?? []) as Parameters<BoardStore['updateCommandInformation']>[1]
+      );
       break;
-    case 'delete_bundle':
-      store.deleteBundle(p.id as string);
+    case 'update_event_properties':
+      store.updateEventProperties(
+        p.eventId as string,
+        (p.eventProperties ?? []) as Parameters<BoardStore['updateEventProperties']>[1]
+      );
+      break;
+    case 'link_entity_to_event':
+      store.linkEntityToEvent(p.eventId as string, p.entityId as string | undefined);
       break;
     case 'add_link':
       store.addLink(p as unknown as Parameters<BoardStore['addLink']>[0]);

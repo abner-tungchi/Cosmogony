@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
 import type { Board, Project, BoardStore } from '../types/board';
-import type { StickyNote, Bundle, Link, FlowPath, Remodel } from '../types/elements';
+import type { StickyNote, Link, FlowPath, Remodel } from '../types/elements';
 
 function createBoard(name: string, parentContextId?: string): Board {
   return {
@@ -11,7 +11,6 @@ function createBoard(name: string, parentContextId?: string): Board {
     name,
     parentContextId,
     notes: [],
-    bundles: [],
     remodels: [],
     links: [],
     flowPaths: [],
@@ -72,8 +71,6 @@ export const useBoardStore = create<BoardStore>()(
         const newBoard = createBoard(name, contextId);
         set((state) => {
           state.project.boards.push(newBoard);
-          // Actor boards are NOT added to openBoardIds — navigated via PathBar only
-          // But ensure the parent context is in openBoardIds (so its tab shows)
           if (!state.project.openBoardIds.includes(contextId)) {
             state.project.openBoardIds.push(contextId);
           }
@@ -93,7 +90,7 @@ export const useBoardStore = create<BoardStore>()(
           const remainingContextBoards = state.project.boards.filter(
             (b: Board) => !toDelete.has(b.id) && !b.parentContextId
           );
-          if (remainingContextBoards.length === 0) return; // guard: keep at least 1 context
+          if (remainingContextBoards.length === 0) return;
 
           state.project.boards = state.project.boards.filter((b: Board) => !toDelete.has(b.id));
           state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => !toDelete.has(i));
@@ -172,40 +169,16 @@ export const useBoardStore = create<BoardStore>()(
         set((state) => {
           const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
           if (!board) return;
+          // Clear commandId references on DomainEvent notes that point to this note
+          for (const note of board.notes) {
+            if (note.commandId === id) {
+              note.commandId = undefined;
+            }
+            if (note.entityId === id) {
+              note.entityId = undefined;
+            }
+          }
           board.notes = board.notes.filter((n: StickyNote) => n.id !== id);
-          board.links = board.links.filter((l: Link) => l.fromId !== id && l.toId !== id);
-          board.updatedAt = new Date().toISOString();
-          state.project.updatedAt = board.updatedAt;
-        }),
-
-      addBundle: (bundle) =>
-        set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
-          if (board) {
-            board.bundles.push(bundle);
-            board.updatedAt = new Date().toISOString();
-            state.project.updatedAt = board.updatedAt;
-          }
-        }),
-
-      updateBundle: (id, updates) =>
-        set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
-          if (!board) return;
-          const bundle = board.bundles.find((b: Bundle) => b.id === id);
-          if (bundle) {
-            Object.assign(bundle, updates);
-            bundle.updatedAt = new Date().toISOString();
-            board.updatedAt = bundle.updatedAt;
-            state.project.updatedAt = bundle.updatedAt;
-          }
-        }),
-
-      deleteBundle: (id) =>
-        set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
-          if (!board) return;
-          board.bundles = board.bundles.filter((b: Bundle) => b.id !== id);
           board.links = board.links.filter((l: Link) => l.fromId !== id && l.toId !== id);
           board.updatedAt = new Date().toISOString();
           state.project.updatedAt = board.updatedAt;
@@ -235,7 +208,6 @@ export const useBoardStore = create<BoardStore>()(
           const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
           if (board) {
             board.notes = [];
-            board.bundles = [];
             board.remodels = [];
             board.links = [];
             board.updatedAt = new Date().toISOString();
@@ -243,60 +215,84 @@ export const useBoardStore = create<BoardStore>()(
           }
         }),
 
-      collapseAllBundles: () =>
+      addCommandForEvent: (eventNoteId, commandLabel, information) =>
         set((state) => {
           const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
           if (!board) return;
-          const now = new Date().toISOString();
-          for (const bundle of board.bundles) {
-            bundle.collapsed = true;
-            bundle.updatedAt = now;
-          }
-          board.updatedAt = now;
-          state.project.updatedAt = now;
-        }),
+          const eventNote = board.notes.find((n: StickyNote) => n.id === eventNoteId);
+          if (!eventNote || eventNote.type !== 'DomainEvent') return;
 
-      expandAllBundles: () =>
-        set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
-          if (!board) return;
           const now = new Date().toISOString();
-          for (const bundle of board.bundles) {
-            bundle.collapsed = false;
-            bundle.updatedAt = now;
-          }
-          board.updatedAt = now;
-          state.project.updatedAt = now;
-        }),
-
-      expandNoteToBundle: (noteId) =>
-        set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
-          if (!board) return;
-          const note = board.notes.find((n: StickyNote) => n.id === noteId);
-          if (!note || note.type !== 'DomainEvent') return;
-          const now = new Date().toISOString();
-          const bundle: Bundle = {
+          const commandNote: StickyNote = {
             id: uuidv4(),
-            position: { x: note.position.x, y: note.position.y },
-            infoNote: { label: '', content: '' },
-            entityNote: { label: 'Params', content: '' },
-            commandNote: { label: '', content: '' },
-            eventNote: { label: note.label, content: '' },
-            zIndex: note.zIndex,
-            collapsed: false,
+            type: 'Command',
+            label: commandLabel,
+            position: {
+              x: eventNote.position.x - 200,
+              y: eventNote.position.y,
+            },
+            size: { width: 160, height: 80 },
+            zIndex: eventNote.zIndex,
+            information,
             createdAt: now,
             updatedAt: now,
           };
-          board.bundles.push(bundle);
-          // Migrate links from note → bundle
-          for (const link of board.links) {
-            if (link.fromId === noteId) { link.fromId = bundle.id; link.fromType = 'bundle'; }
-            if (link.toId === noteId) { link.toId = bundle.id; link.toType = 'bundle'; }
-          }
-          board.notes = board.notes.filter((n: StickyNote) => n.id !== noteId);
+
+          board.notes.push(commandNote);
+
+          // Link Command → DomainEvent
+          const link: Link = {
+            id: uuidv4(),
+            fromId: commandNote.id,
+            toId: eventNoteId,
+            fromType: 'note',
+            toType: 'note',
+            createdAt: now,
+          };
+          board.links.push(link);
+
+          // Update DomainEvent's commandId backref
+          eventNote.commandId = commandNote.id;
+          eventNote.updatedAt = now;
+
           board.updatedAt = now;
           state.project.updatedAt = now;
+        }),
+
+      updateCommandInformation: (commandId, information) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === commandId);
+          if (!note) return;
+          note.information = information;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      updateEventProperties: (eventId, eventProperties) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === eventId);
+          if (!note) return;
+          note.eventProperties = eventProperties;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      linkEntityToEvent: (eventId, entityId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === eventId);
+          if (!note) return;
+          note.entityId = entityId;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
         }),
 
       addRemodel: (remodel) =>
@@ -365,7 +361,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 8,
+      version: 9,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -393,9 +389,6 @@ export const useBoardStore = create<BoardStore>()(
             notes: (oldBoard.notes ?? [])
               .filter((n) => !n.clusterId)
               .map(({ clusterId: _c, ...n }) => n as unknown as StickyNote),
-            bundles: (oldBoard.bundles ?? [])
-              .filter((b) => !b.clusterId)
-              .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
             remodels: [],
             links: (oldBoard.links ?? []) as Link[],
             flowPaths: [],
@@ -409,9 +402,6 @@ export const useBoardStore = create<BoardStore>()(
             notes: (oldBoard.notes ?? [])
               .filter((n) => n.clusterId === cluster.id)
               .map(({ clusterId: _c, ...n }) => n as unknown as StickyNote),
-            bundles: (oldBoard.bundles ?? [])
-              .filter((b) => b.clusterId === cluster.id)
-              .map(({ clusterId: _c, ...b }) => b as unknown as Bundle),
             remodels: [],
             links: [],
             flowPaths: [],
@@ -434,33 +424,25 @@ export const useBoardStore = create<BoardStore>()(
         }
 
         if (version === 3) {
-          // v3 → v4: add openBoardIds if missing
           const s = persistedState as { project?: Project & { openBoardIds?: string[] } };
           if (s.project && !s.project.openBoardIds) {
             s.project.openBoardIds = s.project.boards.map((b) => b.id);
           }
-          // fall through to v4 migration
         }
 
         if (version <= 4) {
-          // v4 → v5: add flowPaths to boards, paths to bundles/notes
+          // v4 → v5: add flowPaths to boards, paths to notes
           const s = persistedState as { project?: Project };
           if (s.project) {
             for (const board of s.project.boards) {
               const b = board as Board & { flowPaths?: FlowPath[] };
               if (!b.flowPaths) b.flowPaths = [];
-              for (const bundle of board.bundles) {
-                const bun = bundle as Bundle & { paths?: string[]; policies?: [] };
-                if (!bun.paths) bun.paths = [];
-                if (!bun.policies) bun.policies = [];
-              }
               for (const note of board.notes) {
                 const n = note as StickyNote & { paths?: string[] };
                 if (!n.paths) n.paths = [];
               }
             }
           }
-          // fall through to v5 → v6
         }
 
         if (version <= 5) {
@@ -472,37 +454,159 @@ export const useBoardStore = create<BoardStore>()(
               if (!b.remodels) b.remodels = [];
             }
           }
-          // fall through to v7 migration
         }
 
         if (version < 7) {
-          // v6 → v7: rename sourceEventNote → returnTypeNote, add linkedDtoIds, add sourceEventsExpanded
+          // v6 → v7: rename sourceEventNote → returnTypeNote, add linkedDtoIds
           const s = persistedState as { project?: Project };
           if (s.project) {
             for (const board of s.project.boards) {
               if (!board.remodels) board.remodels = [];
               for (const remodel of board.remodels) {
-                // Rename sourceEventNote → returnTypeNote (preserve content)
                 const r = remodel as unknown as Record<string, unknown>;
                 if ('sourceEventNote' in r && !('returnTypeNote' in r)) {
                   r['returnTypeNote'] = r['sourceEventNote'];
                   delete r['sourceEventNote'];
                 }
-                // Add linkedDtoIds if missing
                 if (!remodel.linkedDtoIds) {
                   remodel.linkedDtoIds = [];
                 }
-                // sourceEventsExpanded is optional — undefined === true by convention, no need to set
               }
             }
           }
-          // fall through to v8 migration
         }
 
         if (version < 8) {
-          // v7 → v8: add parentContextId field — optional, no data transform needed
-          // parentContextId is undefined for all existing boards (they are all context-level)
+          // v7 → v8: add parentContextId field
           return persistedState as BoardStore;
+        }
+
+        if (version < 9) {
+          // v8 → v9: Convert Bundle 4-in-1 cards to Command + DomainEvent StickyNotes + Links
+          const s = persistedState as {
+            project?: {
+              boards?: Array<{
+                notes?: unknown[];
+                bundles?: Array<{
+                  id: string;
+                  position: { x: number; y: number };
+                  infoNote: { label: string; content: string };
+                  entityNote: { label: string; content: string };
+                  commandNote: { label: string; content: string };
+                  eventNote: { label: string; content: string };
+                  zIndex: number;
+                  paths?: string[];
+                  phase?: string;
+                  notes?: string;
+                  createdAt: string;
+                  updatedAt: string;
+                }>;
+                remodels?: unknown[];
+                links?: Array<{
+                  id: string;
+                  fromId: string;
+                  toId: string;
+                  fromType: string;
+                  toType: string;
+                  label?: string;
+                  createdAt: string;
+                }>;
+                flowPaths?: unknown[];
+                [key: string]: unknown;
+              }>;
+              [key: string]: unknown;
+            };
+          };
+
+          if (s.project) {
+            for (const board of s.project.boards ?? []) {
+              const bundles = board.bundles ?? [];
+              const newNotes: unknown[] = [];
+              const newLinks: unknown[] = [];
+
+              // Build a mapping from bundle id to new note IDs for link migration
+              const bundleToEventNoteId = new Map<string, string>();
+
+              for (const bundle of bundles) {
+                const commandNoteId = uuidv4();
+                const eventNoteId = uuidv4();
+
+                // Command note (blue) — offset left of where the event will be
+                const commandNote = {
+                  id: commandNoteId,
+                  type: 'Command',
+                  label: bundle.commandNote.label || 'Command',
+                  position: { x: bundle.position.x + 168, y: bundle.position.y + 128 },
+                  size: { width: 160, height: 80 },
+                  zIndex: bundle.zIndex,
+                  paths: bundle.paths ?? [],
+                  phase: bundle.phase,
+                  notes: bundle.notes,
+                  // Map entityNote content as information (name-only properties)
+                  information: bundle.entityNote.content
+                    ? bundle.entityNote.content.split(',').map((s: string) => ({
+                        attrName: s.trim(),
+                        type: 'String',
+                      }))
+                    : [],
+                  createdAt: bundle.createdAt,
+                  updatedAt: now,
+                };
+
+                // DomainEvent note (orange) — to the right of Command
+                const eventNote = {
+                  id: eventNoteId,
+                  type: 'DomainEvent',
+                  label: bundle.eventNote.label || 'DomainEvent',
+                  position: { x: bundle.position.x + 328, y: bundle.position.y + 128 },
+                  size: { width: 160, height: 80 },
+                  zIndex: bundle.zIndex,
+                  paths: bundle.paths ?? [],
+                  phase: bundle.phase,
+                  notes: bundle.notes,
+                  commandId: commandNoteId,
+                  createdAt: bundle.createdAt,
+                  updatedAt: now,
+                };
+
+                newNotes.push(commandNote);
+                newNotes.push(eventNote);
+                bundleToEventNoteId.set(bundle.id, eventNoteId);
+
+                // Link Command → DomainEvent
+                newLinks.push({
+                  id: uuidv4(),
+                  fromId: commandNoteId,
+                  toId: eventNoteId,
+                  fromType: 'note',
+                  toType: 'note',
+                  createdAt: now,
+                });
+              }
+
+              // Merge new notes with existing notes
+              board.notes = [...(board.notes ?? []), ...newNotes];
+
+              // Migrate existing links: bundle type → note type, bundle id → event note id
+              const existingLinks = (board.links ?? []) as Link[];
+              const migratedLinks = existingLinks.map((link) => {
+                const migrated: Link = { ...link };
+                if ((link.fromType as string) === 'bundle') {
+                  migrated.fromType = 'note';
+                  migrated.fromId = bundleToEventNoteId.get(link.fromId) ?? link.fromId;
+                }
+                if ((link.toType as string) === 'bundle') {
+                  migrated.toType = 'note';
+                  migrated.toId = bundleToEventNoteId.get(link.toId) ?? link.toId;
+                }
+                return migrated;
+              });
+
+              (board as { links: Link[] }).links = [...migratedLinks, ...(newLinks as Link[])];
+              board.bundles = undefined;
+            }
+          }
+          return s as unknown as BoardStore;
         }
 
         return persistedState as BoardStore;

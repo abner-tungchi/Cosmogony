@@ -156,7 +156,7 @@ export const Homepage: React.FC = () => {
               {/* Stats */}
               <div style={{ display: 'flex', gap: 16, fontSize: 13, color: '#64748b' }}>
                 <span>📝 {board.notes.length} note{board.notes.length !== 1 ? 's' : ''}</span>
-                <span>⊞ {board.bundles.length} bundle{board.bundles.length !== 1 ? 's' : ''}</span>
+                <span>⚡ {board.notes.filter((n) => n.type === 'DomainEvent').length} event{board.notes.filter((n) => n.type === 'DomainEvent').length !== 1 ? 's' : ''}</span>
               </div>
 
               <div style={{ fontSize: 12, color: '#94a3b8' }}>

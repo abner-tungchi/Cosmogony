@@ -1,6 +1,5 @@
 import type { Board } from '../types/board';
-import type { StickyNote, Bundle } from '../types/elements';
-import { isUniverseRemodel } from './remodelUtils';
+import type { StickyNote } from '../types/elements';
 
 function getTypeEmoji(type: string): string {
   const emojis: Record<string, string> = {
@@ -40,8 +39,6 @@ function findNearest(
 function getLabelForId(id: string, board: Board): string {
   const note = board.notes.find((n) => n.id === id);
   if (note) return `${note.type}: ${note.label}`;
-  const bundle = board.bundles.find((b) => b.id === id);
-  if (bundle) return `Bundle: ${bundle.infoNote.label}`;
   const remodel = board.remodels?.find((r) => r.id === id);
   if (remodel) return `Remodel: ${remodel.queryNote.label || remodel.aggregateNote.label}`;
   return id;
@@ -54,16 +51,37 @@ export function exportToMarkdown(board: Board): string {
   lines.push(`> Generated on ${new Date().toLocaleString()}`);
   lines.push('');
 
-  // Bundles section
-  if (board.bundles && board.bundles.length > 0) {
-    lines.push('## Bundles');
+  // DomainEvent flows section — show linked Command and Entity
+  const domainEvents = board.notes.filter((n) => n.type === 'DomainEvent');
+  if (domainEvents.length > 0) {
+    lines.push('## Domain Event Flows');
     lines.push('');
-    for (const bundle of board.bundles) {
-      lines.push(`### Bundle: ${bundle.infoNote.label || '(unnamed)'}`);
-      lines.push(`- **Aggregate (Info)**: ${bundle.infoNote.label}${bundle.infoNote.content ? ' — ' + bundle.infoNote.content : ''}`);
-      lines.push(`- **Entity**: ${bundle.entityNote.label}${bundle.entityNote.content ? '\n' + bundle.entityNote.content.split('\n').map((l) => `  - ${l}`).join('\n') : ''}`);
-      lines.push(`- **Command**: ${bundle.commandNote.label}${bundle.commandNote.content ? ' — ' + bundle.commandNote.content : ''}`);
-      lines.push(`- **Event**: ${bundle.eventNote.label}${bundle.eventNote.content ? ' — ' + bundle.eventNote.content : ''}`);
+    for (const event of domainEvents) {
+      lines.push(`### ${event.label || '(unnamed event)'}`);
+      if (event.commandId) {
+        const cmdNote = board.notes.find((n) => n.id === event.commandId);
+        if (cmdNote) {
+          lines.push(`- **Command**: ${cmdNote.label}`);
+          if (cmdNote.information && cmdNote.information.length > 0) {
+            lines.push(`- **Parameters**:`);
+            for (const prop of cmdNote.information) {
+              lines.push(`  - ${prop.attrName}: ${prop.type}`);
+            }
+          }
+        }
+      }
+      if (event.entityId) {
+        const entityNote = board.notes.find((n) => n.id === event.entityId);
+        if (entityNote) {
+          lines.push(`- **Entity/Aggregate**: ${entityNote.label}`);
+        }
+      }
+      if (event.eventProperties && event.eventProperties.length > 0) {
+        lines.push(`- **Event Properties**:`);
+        for (const prop of event.eventProperties) {
+          lines.push(`  - ${prop.attrName}: ${prop.type}`);
+        }
+      }
       lines.push('');
     }
   }
@@ -79,17 +97,6 @@ export function exportToMarkdown(board: Board): string {
       lines.push(`- **Parameters**: ${remodel.parameterNote.label || '—'}${remodel.parameterNote.content ? ' — ' + remodel.parameterNote.content : ''}`);
       lines.push(`- **Query**: ${remodel.queryNote.label || '—'}${remodel.queryNote.content ? ' — ' + remodel.queryNote.content : ''}`);
       lines.push(`- **Return Type**: ${remodel.returnTypeNote.label || '—'}${remodel.returnTypeNote.content ? ' — ' + remodel.returnTypeNote.content : ''}`);
-      if (remodel.linkedBundleIds.length > 0) {
-        const linkedBundleLabels = remodel.linkedBundleIds
-          .map((id) => {
-            const bundle = board.bundles.find((b) => b.id === id);
-            return bundle ? (bundle.commandNote.label || bundle.infoNote.label || id) : id;
-          })
-          .join(', ');
-        lines.push(`- **Linked Bundles**: ${linkedBundleLabels}`);
-      }
-      const universe = isUniverseRemodel(remodel, board.bundles);
-      lines.push(`- **Universe**: ${universe ? 'Yes' : 'No'}`);
       lines.push('');
     }
   }

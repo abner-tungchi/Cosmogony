@@ -1,25 +1,18 @@
-import type { StickyNote, Bundle, Remodel } from '../types/elements';
+import type { StickyNote, Remodel } from '../types/elements';
 
 export interface DragOffset {
   noteIds: string[];    // note IDs currently being dragged
-  bundleIds: string[];  // bundle IDs currently being dragged
   remodelIds: string[]; // remodel IDs currently being dragged
   dx: number;           // canvas-coordinate offset (screen px / zoom)
   dy: number;
 }
 
-// Bundle sub-note layout constants
-const SUB_NOTE_W = 160;
-const SUB_NOTE_H = 120;
-const GAP = 8;
-const BUNDLE_W = SUB_NOTE_W * 3 + GAP * 2; // 496
-const BUNDLE_H = SUB_NOTE_H * 2 + GAP;     // 248
+export const COLLAPSED_REMODEL_W = 400;
+export const COLLAPSED_REMODEL_H = 128;
 
-export const COLLAPSED_BUNDLE_W = 200;
-export const COLLAPSED_BUNDLE_H = 64;
-
-export const COLLAPSED_REMODEL_W = 200;
-export const COLLAPSED_REMODEL_H = 64;
+// Remodel expanded dimensions (same as old Bundle constants)
+const REMODEL_W = 496;
+const REMODEL_H = 248;
 
 function getNoteBounds(note: StickyNote) {
   return {
@@ -32,22 +25,9 @@ function getNoteBounds(note: StickyNote) {
   };
 }
 
-function getBundleBounds(bundle: Bundle) {
-  const w = bundle.collapsed ? COLLAPSED_BUNDLE_W : BUNDLE_W;
-  const h = bundle.collapsed ? COLLAPSED_BUNDLE_H : BUNDLE_H;
-  return {
-    left: bundle.position.x,
-    top: bundle.position.y,
-    right: bundle.position.x + w,
-    bottom: bundle.position.y + h,
-    cx: bundle.position.x + w / 2,
-    cy: bundle.position.y + h / 2,
-  };
-}
-
 function getRemodelBounds(remodel: Remodel) {
-  const w = remodel.collapsed ? COLLAPSED_REMODEL_W : BUNDLE_W;
-  const h = remodel.collapsed ? COLLAPSED_REMODEL_H : BUNDLE_H;
+  const w = remodel.collapsed ? (remodel.collapsedSize?.width ?? COLLAPSED_REMODEL_W) : REMODEL_W;
+  const h = remodel.collapsed ? (remodel.collapsedSize?.height ?? COLLAPSED_REMODEL_H) : REMODEL_H;
   return {
     left: remodel.position.x,
     top: remodel.position.y,
@@ -72,14 +52,12 @@ function getBestAnchor(from: Bounds, to: Bounds): { fx: number; fy: number; tx: 
   const dy = to.cy - from.cy;
 
   if (Math.abs(dx) >= Math.abs(dy)) {
-    // Horizontal connection
     if (dx > 0) {
       return { fx: from.right, fy: from.cy, tx: to.left, ty: to.cy };
     } else {
       return { fx: from.left, fy: from.cy, tx: to.right, ty: to.cy };
     }
   } else {
-    // Vertical connection
     if (dy > 0) {
       return { fx: from.cx, fy: from.bottom, tx: to.cx, ty: to.top };
     } else {
@@ -94,11 +72,10 @@ function shiftBounds(b: Bounds, dx: number, dy: number): Bounds {
 
 export function getAnchorPoints(
   fromId: string,
-  fromType: 'note' | 'bundle' | 'remodel',
+  fromType: 'note' | 'remodel',
   toId: string,
-  toType: 'note' | 'bundle' | 'remodel',
+  toType: 'note' | 'remodel',
   notes: StickyNote[],
-  bundles: Bundle[],
   drag?: DragOffset | null,
   remodels?: Remodel[]
 ): { fx: number; fy: number; tx: number; ty: number } | null {
@@ -108,9 +85,6 @@ export function getAnchorPoints(
   if (fromType === 'note') {
     const note = notes.find((n) => n.id === fromId);
     if (note) fromBounds = getNoteBounds(note);
-  } else if (fromType === 'bundle') {
-    const bundle = bundles.find((b) => b.id === fromId);
-    if (bundle) fromBounds = getBundleBounds(bundle);
   } else {
     const remodel = remodels?.find((r) => r.id === fromId);
     if (remodel) fromBounds = getRemodelBounds(remodel);
@@ -119,9 +93,6 @@ export function getAnchorPoints(
   if (toType === 'note') {
     const note = notes.find((n) => n.id === toId);
     if (note) toBounds = getNoteBounds(note);
-  } else if (toType === 'bundle') {
-    const bundle = bundles.find((b) => b.id === toId);
-    if (bundle) toBounds = getBundleBounds(bundle);
   } else {
     const remodel = remodels?.find((r) => r.id === toId);
     if (remodel) toBounds = getRemodelBounds(remodel);
@@ -131,9 +102,8 @@ export function getAnchorPoints(
 
   // Apply live drag offset so links track the element while dragging
   if (drag) {
-    const getDragIds = (type: 'note' | 'bundle' | 'remodel') => {
+    const getDragIds = (type: 'note' | 'remodel') => {
       if (type === 'note') return drag.noteIds;
-      if (type === 'bundle') return drag.bundleIds;
       return drag.remodelIds;
     };
     if (getDragIds(fromType).includes(fromId)) fromBounds = shiftBounds(fromBounds, drag.dx, drag.dy);

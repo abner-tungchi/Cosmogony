@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import type { Remodel as RemodelType, Bundle, BundleSubNote, FlowPath } from '../../types/elements';
+import type { Remodel as RemodelType, BundleSubNote, FlowPath } from '../../types/elements';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
-import { isUniverseRemodel } from '../../utils/remodelUtils';
 import { COLLAPSED_REMODEL_W, COLLAPSED_REMODEL_H } from '../../utils/linkUtils';
 import { PathDots } from '../PathBar/PathDots';
 
@@ -11,22 +10,20 @@ const SUB_W = 160;
 const SUB_H = 120;
 const GAP = 8;
 
-// Sub-note offsets (same layout as Bundle)
-const INFO_X = SUB_W + GAP;
-const INFO_Y = 0;
+// Sub-note offsets — single row layout
 const ENTITY_X = 0;
-const ENTITY_Y = SUB_H + GAP;
+const ENTITY_Y = 0;
 const COMMAND_X = SUB_W + GAP;
-const COMMAND_Y = SUB_H + GAP;
+const COMMAND_Y = 0;
 const EVENT_X = (SUB_W + GAP) * 2;
-const EVENT_Y = SUB_H + GAP;
+const EVENT_Y = 0;
 
 // Remodel color palette (cool tones — distinct from Bundle's warm palette)
 const COLORS = {
-  aggregate: '#e9d5ff',   // top: light purple (Aggregate read perspective)
-  parameter: '#cffafe',   // bottom-left: cyan (Query parameters)
-  query: '#bfdbfe',       // bottom-center: blue-gray (Query name)
-  returnType: '#bbf7d0',  // bottom-right: mint green (Return type — distinct from input cyan)
+  aggregate: '#e9d5ff',   // (data model only — not rendered on canvas)
+  parameter: '#bbf7d0',   // left: mint green (Query parameters)
+  query: '#bfdbfe',       // center: blue-gray (Query name)
+  returnType: '#bbf7d0',  // right: mint green (Return type)
   text: '#1e293b',
   collapsed: '#a78bfa',   // collapsed card background: purple
 } as const;
@@ -40,10 +37,11 @@ interface SubNoteProps {
   offsetY: number;
   onSave: (label: string, content: string) => void;
   zoom: number;
+  labelPlaceholder?: string;
 }
 
 const SubNote: React.FC<SubNoteProps> = ({
-  label, content, bgColor, textColor, offsetX, offsetY, onSave, zoom,
+  label, content, bgColor, textColor, offsetX, offsetY, onSave, labelPlaceholder,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editLabel, setEditLabel] = useState(label);
@@ -85,7 +83,7 @@ const SubNote: React.FC<SubNoteProps> = ({
         boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
         display: 'flex',
         flexDirection: 'column',
-        fontSize: `${13 / zoom}px`,
+        fontSize: '13px',
         cursor: 'default',
         overflow: 'hidden',
       }}
@@ -105,7 +103,7 @@ const SubNote: React.FC<SubNoteProps> = ({
               border: 'none',
               outline: 'none',
               color: textColor,
-              fontSize: `${12 / zoom}px`,
+              fontSize: '12px',
               fontWeight: 700,
               padding: '2px 4px',
               borderRadius: 3,
@@ -123,7 +121,7 @@ const SubNote: React.FC<SubNoteProps> = ({
               border: 'none',
               outline: 'none',
               color: textColor,
-              fontSize: `${11 / zoom}px`,
+              fontSize: '11px',
               resize: 'none',
               padding: '2px 4px',
               borderRadius: 3,
@@ -133,10 +131,10 @@ const SubNote: React.FC<SubNoteProps> = ({
         </div>
       ) : (
         <>
-          <div style={{ fontSize: `${11 / zoom}px`, fontWeight: 700, marginBottom: 4, opacity: 0.9 }}>
-            {label || <span style={{ opacity: 0.5 }}>Label</span>}
+          <div style={{ fontSize: '11px', fontWeight: 700, marginBottom: 4, opacity: 0.9 }}>
+            {label || <span style={{ opacity: 0.5 }}>{labelPlaceholder ?? 'Label'}</span>}
           </div>
-          <div style={{ fontSize: `${11 / zoom}px`, lineHeight: 1.4, opacity: 0.85, overflow: 'hidden', wordBreak: 'break-word' }}>
+          <div style={{ fontSize: '11px', lineHeight: 1.4, opacity: 0.85, overflow: 'hidden', wordBreak: 'break-word' }}>
             {content || <span style={{ opacity: 0.4 }}>Double-click to edit</span>}
           </div>
         </>
@@ -146,47 +144,44 @@ const SubNote: React.FC<SubNoteProps> = ({
 };
 
 // --- Source Events Panel ---
+// Post-migration: linkedBundleIds now holds note IDs (DomainEvent notes that this Remodel sources from)
 
 interface SourceEventItem {
-  bundleId: string;
+  noteId: string;
   eventLabel: string;
-  aggregateLabel: string;
   isDeleted: boolean;
 }
 
 interface SourceEventsPanelProps {
-  linkedBundleIds: string[];
+  linkedNoteIds: string[];
   sourceEventsExpanded: boolean;
-  bundles: Bundle[];
   zoom: number;
   onToggle: () => void;
 }
 
-const PANEL_TOP_OFFSET = 4; // gap between 4-in-1 card bottom and Source Events panel
-const REMODEL_CARD_H = SUB_H * 2 + GAP;
+const PANEL_TOP_OFFSET = 4;
+const REMODEL_CARD_H = SUB_H;
 const REMODEL_CARD_W = SUB_W * 3 + GAP * 2;
 
 const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
-  linkedBundleIds,
+  linkedNoteIds,
   sourceEventsExpanded,
-  bundles,
-  zoom,
   onToggle,
 }) => {
-  const sourceEvents: SourceEventItem[] = linkedBundleIds.map((bundleId) => {
-    const bundle = bundles.find((b) => b.id === bundleId);
-    if (!bundle) {
-      return { bundleId, eventLabel: '', aggregateLabel: '', isDeleted: true };
+  const activeBoard = useBoardStore(selectActiveBoard);
+  const sourceEvents: SourceEventItem[] = linkedNoteIds.map((noteId) => {
+    const note = activeBoard.notes.find((n) => n.id === noteId);
+    if (!note) {
+      return { noteId, eventLabel: '', isDeleted: true };
     }
     return {
-      bundleId,
-      eventLabel: bundle.eventNote.label,
-      aggregateLabel: bundle.infoNote.label,
+      noteId,
+      eventLabel: note.label,
       isDeleted: false,
     };
   });
 
-  const count = linkedBundleIds.length;
+  const count = linkedNoteIds.length;
 
   const containerStyle: React.CSSProperties = {
     position: 'absolute',
@@ -206,7 +201,7 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
     return (
       <div style={containerStyle} onClick={(e) => { e.stopPropagation(); onToggle(); }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: `${11 / zoom}px`, color: '#94a3b8' }}>
+          <span style={{ fontSize: '11px', color: '#cbd5e1' }}>
             {count} Source Event{count !== 1 ? 's' : ''}
           </span>
           <button
@@ -214,8 +209,8 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
-              fontSize: `${12 / zoom}px`,
+              color: '#cbd5e1',
+              fontSize: '12px',
               cursor: 'pointer',
               padding: 0,
               lineHeight: 1,
@@ -240,11 +235,11 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
         marginBottom: count > 0 ? 6 : 0,
       }}>
         <span style={{
-          fontSize: `${10 / zoom}px`,
+          fontSize: '10px',
           fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
-          color: '#64748b',
+          color: '#94a3b8',
         }}>
           Source Events{count > 0 ? ` (${count})` : ''}
         </span>
@@ -254,8 +249,8 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
-              fontSize: `${12 / zoom}px`,
+              color: '#cbd5e1',
+              fontSize: '12px',
               cursor: 'pointer',
               padding: 0,
               lineHeight: 1,
@@ -269,9 +264,9 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
 
       {/* Empty state */}
       {count === 0 && (
-        <div style={{ fontSize: `${11 / zoom}px`, color: '#64748b', fontStyle: 'italic', lineHeight: 1.5 }}>
-          No linked bundles.<br />
-          Use Link Mode or Detail Panel to add bundles.
+        <div style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', lineHeight: 1.5 }}>
+          No linked notes.<br />
+          Use Link Mode or Detail Panel to link notes.
         </div>
       )}
 
@@ -280,7 +275,7 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
         <div>
           {sourceEvents.map((item) => (
             <div
-              key={item.bundleId}
+              key={item.noteId}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -292,43 +287,30 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
                 opacity: item.isDeleted ? 0.5 : 1,
               }}
             >
-              <span style={{ fontSize: `${11 / zoom}px`, flexShrink: 0 }}>&#9889;</span>
+              <span style={{ fontSize: '11px', flexShrink: 0 }}>&#9889;</span>
               {item.isDeleted ? (
                 <span style={{
-                  fontSize: `${12 / zoom}px`,
+                  fontSize: '12px',
                   color: '#94a3b8',
                   fontStyle: 'italic',
                   textDecoration: 'line-through',
                 }}>
-                  (Deleted Bundle)
+                  (Deleted Note)
                 </span>
               ) : (
-                <>
-                  <span style={{
-                    fontSize: `${12 / zoom}px`,
-                    color: '#e2e8f0',
-                    fontWeight: 500,
-                    flex: 1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {item.eventLabel || (
-                      <span style={{ opacity: 0.5, fontStyle: 'italic' }}>Unnamed Event</span>
-                    )}
-                  </span>
-                  {item.aggregateLabel && (
-                    <span style={{
-                      fontSize: `${10 / zoom}px`,
-                      color: '#94a3b8',
-                      whiteSpace: 'nowrap',
-                      marginLeft: 'auto',
-                      flexShrink: 0,
-                    }}>
-                      ({item.aggregateLabel})
-                    </span>
+                <span style={{
+                  fontSize: '12px',
+                  color: '#e2e8f0',
+                  fontWeight: 500,
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {item.eventLabel || (
+                    <span style={{ opacity: 0.5, fontStyle: 'italic' }}>Unnamed Note</span>
                   )}
-                </>
+                </span>
               )}
             </div>
           ))}
@@ -342,8 +324,7 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
 
 interface Props {
   remodel: RemodelType;
-  bundles: Bundle[];
-  onLinkTarget?: (id: string, type: 'note' | 'bundle' | 'remodel') => void;
+  onLinkTarget?: (id: string, type: 'note' | 'remodel') => void;
   onDetailClick?: (id: string) => void;
   activePath?: string | null;
   allPaths?: FlowPath[];
@@ -369,21 +350,17 @@ const BTN_STYLE: React.CSSProperties = {
 
 export const Remodel: React.FC<Props> = ({
   remodel,
-  bundles,
   onLinkTarget,
   onDetailClick,
   activePath = null,
   allPaths = [],
 }) => {
   const { updateRemodel, deleteRemodel } = useBoardStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
   const { zoom, isLinkingMode } = useUIStore();
 
   const isDimmed =
     activePath !== null &&
     !(remodel.paths ?? []).includes(activePath);
-
-  const isUniverse = isUniverseRemodel(remodel, activeBoard.bundles);
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `remodel-${remodel.id}`,
@@ -429,9 +406,52 @@ export const Remodel: React.FC<Props> = ({
   };
 
   const REMODEL_W = SUB_W * 3 + GAP * 2;
-  const REMODEL_H = SUB_H * 2 + GAP;
+  const REMODEL_H = SUB_H;
 
-  const saveSub = (key: keyof Pick<RemodelType, 'aggregateNote' | 'parameterNote' | 'queryNote' | 'returnTypeNote'>) =>
+  // Collapsed resize — refs must be at top level (Rules of Hooks)
+  const collapsedResizeRightRef = useRef<{ startX: number; startW: number; startH: number } | null>(null);
+  const collapsedResizeBottomRef = useRef<{ startY: number; startW: number; startH: number } | null>(null);
+
+  const collapsedW = remodel.collapsedSize?.width ?? COLLAPSED_REMODEL_W;
+  const collapsedH = remodel.collapsedSize?.height ?? COLLAPSED_REMODEL_H;
+
+  const handleCollapsedRightMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    collapsedResizeRightRef.current = { startX: e.clientX, startW: collapsedW, startH: collapsedH };
+    const onMove = (ev: MouseEvent) => {
+      if (!collapsedResizeRightRef.current) return;
+      const newW = Math.max(120, collapsedResizeRightRef.current.startW + (ev.clientX - collapsedResizeRightRef.current.startX) / zoom);
+      updateRemodel(remodel.id, { collapsedSize: { width: newW, height: collapsedResizeRightRef.current.startH } });
+    };
+    const onUp = () => {
+      collapsedResizeRightRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const handleCollapsedBottomMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    collapsedResizeBottomRef.current = { startY: e.clientY, startW: collapsedW, startH: collapsedH };
+    const onMove = (ev: MouseEvent) => {
+      if (!collapsedResizeBottomRef.current) return;
+      const newH = Math.max(40, collapsedResizeBottomRef.current.startH + (ev.clientY - collapsedResizeBottomRef.current.startY) / zoom);
+      updateRemodel(remodel.id, { collapsedSize: { width: collapsedResizeBottomRef.current.startW, height: newH } });
+    };
+    const onUp = () => {
+      collapsedResizeBottomRef.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
+
+  const saveSub = (key: keyof Pick<RemodelType, 'parameterNote' | 'queryNote' | 'returnTypeNote'>) =>
     (label: string, content: string) => {
       updateRemodel(remodel.id, { [key]: { label, content } as BundleSubNote });
     };
@@ -443,8 +463,8 @@ export const Remodel: React.FC<Props> = ({
         ref={setNodeRef}
         style={{
           ...baseStyle,
-          width: COLLAPSED_REMODEL_W,
-          height: COLLAPSED_REMODEL_H,
+          width: collapsedW,
+          height: collapsedH,
           backgroundColor: COLORS.collapsed,
           color: 'white',
           borderRadius: 6,
@@ -462,7 +482,7 @@ export const Remodel: React.FC<Props> = ({
         {/* Aggregate — subtitle row */}
         {remodel.aggregateNote.label && (
           <div style={{
-            fontSize: `${10 / zoom}px`,
+            fontSize: '10px',
             opacity: 0.75,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -475,40 +495,14 @@ export const Remodel: React.FC<Props> = ({
 
         {/* Query — main title row */}
         <div style={{
-          fontSize: `${12 / zoom}px`,
+          fontSize: '12px',
           fontWeight: 700,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}>
-          {remodel.queryNote.label || 'Remodel'}
+          {remodel.queryNote.content || 'GetXXXReadModel'}
         </div>
-
-        {/* Universe badge */}
-        {isUniverse && (
-          <div
-            title="Universe Remodel — crosses multiple Aggregates"
-            style={{
-              position: 'absolute',
-              top: 4,
-              left: 8,
-              width: 16,
-              height: 16,
-              borderRadius: '50%',
-              backgroundColor: '#7c3aed',
-              color: 'white',
-              fontSize: 9,
-              fontWeight: 'bold',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 10001,
-              pointerEvents: 'none',
-            }}
-          >
-            ∪
-          </div>
-        )}
 
         {/* Expand button */}
         <button
@@ -524,10 +518,10 @@ export const Remodel: React.FC<Props> = ({
             color: 'white',
             cursor: 'pointer',
             padding: '3px 6px',
-            fontSize: `${11 / zoom}px`,
+            fontSize: '11px',
             lineHeight: 1,
           }}
-          title="展開 Remodel"
+          title="展開 Read Model"
         >
           ▼
         </button>
@@ -539,6 +533,32 @@ export const Remodel: React.FC<Props> = ({
         >
           ×
         </button>
+
+        {/* Right-edge resize handle */}
+        <div
+          onMouseDown={handleCollapsedRightMouseDown}
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: 6,
+            cursor: 'ew-resize',
+          }}
+        />
+
+        {/* Bottom-edge resize handle */}
+        <div
+          onMouseDown={handleCollapsedBottomMouseDown}
+          style={{
+            position: 'absolute',
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 6,
+            cursor: 'ns-resize',
+          }}
+        />
 
         <PathDots pathIds={remodel.paths ?? []} allPaths={allPaths} />
       </div>
@@ -554,19 +574,7 @@ export const Remodel: React.FC<Props> = ({
       onMouseDown={(e) => e.stopPropagation()}
       {...dragProps}
     >
-      {/* Aggregate (light purple) — top center */}
-      <SubNote
-        label={remodel.aggregateNote.label}
-        content={remodel.aggregateNote.content}
-        bgColor={COLORS.aggregate}
-        textColor={COLORS.text}
-        offsetX={INFO_X}
-        offsetY={INFO_Y}
-        onSave={saveSub('aggregateNote')}
-        zoom={zoom}
-      />
-
-      {/* Parameters (cyan) — bottom left */}
+      {/* Parameters (mint green) — left */}
       <SubNote
         label={remodel.parameterNote.label}
         content={remodel.parameterNote.content}
@@ -576,9 +584,10 @@ export const Remodel: React.FC<Props> = ({
         offsetY={ENTITY_Y}
         onSave={saveSub('parameterNote')}
         zoom={zoom}
+        labelPlaceholder="Parameters"
       />
 
-      {/* Query (blue-gray) — bottom center */}
+      {/* Query (blue-gray) — center */}
       <SubNote
         label={remodel.queryNote.label}
         content={remodel.queryNote.content}
@@ -588,9 +597,10 @@ export const Remodel: React.FC<Props> = ({
         offsetY={COMMAND_Y}
         onSave={saveSub('queryNote')}
         zoom={zoom}
+        labelPlaceholder="Read Model Name"
       />
 
-      {/* Return Type (mint green) — bottom right */}
+      {/* Return Type (mint green) — right */}
       <SubNote
         label={remodel.returnTypeNote.label}
         content={remodel.returnTypeNote.content}
@@ -600,39 +610,14 @@ export const Remodel: React.FC<Props> = ({
         offsetY={EVENT_Y}
         onSave={saveSub('returnTypeNote')}
         zoom={zoom}
+        labelPlaceholder="Return"
       />
-
-      {/* Universe badge — shown when linkedBundleIds spans > 1 distinct Aggregate */}
-      {isUniverse && (
-        <div
-          title="Universe Remodel — crosses multiple Aggregates"
-          style={{
-            position: 'absolute',
-            top: 4,
-            right: 28, // offset left of the delete button
-            width: 20,
-            height: 20,
-            borderRadius: '50%',
-            backgroundColor: '#7c3aed',
-            color: 'white',
-            fontSize: 10,
-            fontWeight: 'bold',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 10001,
-            pointerEvents: 'none',
-          }}
-        >
-          ∪
-        </div>
-      )}
 
       {/* Collapse button — top left */}
       <button
         onClick={(e) => { e.stopPropagation(); updateRemodel(remodel.id, { collapsed: true }); }}
         style={{ ...BTN_STYLE, left: -8, background: COLORS.collapsed }}
-        title="收起 Remodel"
+        title="收起 Read Model"
       >
         ▲
       </button>
@@ -649,9 +634,8 @@ export const Remodel: React.FC<Props> = ({
 
       {/* Source Events panel — always render when main card is expanded */}
       <SourceEventsPanel
-        linkedBundleIds={remodel.linkedBundleIds}
+        linkedNoteIds={remodel.linkedBundleIds}
         sourceEventsExpanded={sourceEventsExpanded}
-        bundles={bundles}
         zoom={zoom}
         onToggle={handleToggleSourceEvents}
       />

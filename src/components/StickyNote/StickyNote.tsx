@@ -1,10 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import type { StickyNote as StickyNoteType, FlowPath } from '../../types/elements';
+import type { StickyNote as StickyNoteType, FlowPath, TextFormat } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { PathDots } from '../PathBar/PathDots';
+import { FormatToolbar } from './FormatToolbar';
 
 // ─── Dto Note Body ────────────────────────────────────────────────────────────
 
@@ -65,6 +66,9 @@ interface Props {
   onDetailClick?: (id: string) => void;
   activePath?: string | null;
   allPaths?: FlowPath[];
+  onAddCommand?: (eventNoteId: string) => void;
+  onSetEntity?: (eventNoteId: string) => void;
+  allNotes?: StickyNoteType[];
 }
 
 export const StickyNote: React.FC<Props> = ({
@@ -75,21 +79,33 @@ export const StickyNote: React.FC<Props> = ({
   onDetailClick,
   activePath = null,
   allPaths = [],
+  onAddCommand,
+  onSetEntity,
+  allNotes = [],
 }) => {
   const { zoom, isLinkingMode } = useUIStore();
 
   const isDimmed =
     activePath !== null &&
     !(note.paths ?? []).includes(activePath);
-  const { updateNote, deleteNote, expandNoteToBundle } = useBoardStore();
+  const { updateNote, deleteNote } = useBoardStore();
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(note.label);
+  const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
 
   const config = ELEMENT_CONFIGS[note.type];
   const isDiamond = note.type === 'Diamond';
   const isDto = note.type === 'Dto';
+  const isDomainEvent = note.type === 'DomainEvent';
+
+  // FormatToolbar is only shown for non-Diamond, non-Dto note types
+  const showFormatToolbar = isSelected && !isLinkingMode && !isDiamond && !isDto;
+  const format: TextFormat = note.textFormat ?? {};
+
+  const noteScreenRect = wrapperRef.current?.getBoundingClientRect() ?? null;
 
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: note.id,
@@ -252,15 +268,94 @@ export const StickyNote: React.FC<Props> = ({
     </button>
   );
 
-  const expandBtn = isSelected && note.type === 'DomainEvent' && !isLinkingMode && (
-    <button
-      onClick={(e) => { e.stopPropagation(); expandNoteToBundle(note.id); }}
-      style={{ ...actionBtnStyle, left: -8, background: '#FF8C00' }}
-      title="展開為 Bundle"
+  // DomainEvent action bar — shown on hover or select, only when not in link mode
+  const linkedCommandNote = isDomainEvent && note.commandId
+    ? allNotes.find((n) => n.id === note.commandId)
+    : undefined;
+  const linkedEntityNote = isDomainEvent && note.entityId
+    ? allNotes.find((n) => n.id === note.entityId)
+    : undefined;
+
+  const showActionBar = isDomainEvent && !isLinkingMode && !isDimmed && (isHovered || isSelected);
+
+  const domainEventActionBar = showActionBar && (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: -32,
+        left: 0,
+        right: 0,
+        display: 'flex',
+        gap: 4,
+        justifyContent: 'center',
+        zIndex: 10001,
+        pointerEvents: 'auto',
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
     >
-      ⊞
-    </button>
+      {/* Add/View Command button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onAddCommand?.(note.id);
+        }}
+        title={linkedCommandNote ? `Command: ${linkedCommandNote.label}` : 'Add Command'}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '3px 8px',
+          background: linkedCommandNote ? 'rgba(30,136,229,0.9)' : 'rgba(30,136,229,0.7)',
+          border: '1px solid rgba(30,136,229,0.9)',
+          borderRadius: 4,
+          color: '#fff',
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          fontFamily: 'inherit',
+          backdropFilter: 'blur(4px)',
+        }}
+      >
+        {linkedCommandNote ? `⊡ ${linkedCommandNote.label || 'Command'}` : '+ Command'}
+      </button>
+
+      {/* Set Entity button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onSetEntity?.(note.id);
+        }}
+        title={linkedEntityNote ? `Entity: ${linkedEntityNote.label}` : 'Set Aggregate Entity'}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '3px 8px',
+          background: linkedEntityNote ? 'rgba(255,214,0,0.9)' : 'rgba(100,116,139,0.7)',
+          border: `1px solid ${linkedEntityNote ? 'rgba(255,214,0,0.9)' : 'rgba(100,116,139,0.7)'}`,
+          borderRadius: 4,
+          color: linkedEntityNote ? '#1e293b' : '#fff',
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+          fontFamily: 'inherit',
+          backdropFilter: 'blur(4px)',
+        }}
+      >
+        {linkedEntityNote ? `◆ ${linkedEntityNote.label || 'Entity'}` : 'Set Entity'}
+      </button>
+    </div>
   );
+
+  // Derived textFormat styles for text content
+  const textFormatStyles: React.CSSProperties = {
+    fontSize: format.fontSize ? `${format.fontSize / zoom}px` : undefined,
+    fontWeight: format.bold ? 700 : undefined,
+    fontStyle: format.italic ? 'italic' : undefined,
+    color: format.color ?? config.textColor,
+  };
 
   if (isDiamond) {
     return (
@@ -291,7 +386,7 @@ export const StickyNote: React.FC<Props> = ({
             style={{
               transform: 'rotate(-45deg)',
               color: config.textColor,
-              fontSize: `${12 / zoom}px`,
+              fontSize: '12px',
               textAlign: 'center',
               padding: 8,
               width: '80%',
@@ -312,7 +407,7 @@ export const StickyNote: React.FC<Props> = ({
                   border: 'none',
                   outline: 'none',
                   color: config.textColor,
-                  fontSize: `${12 / zoom}px`,
+                  fontSize: '12px',
                   resize: 'none',
                   cursor: 'text',
                   fontFamily: 'inherit',
@@ -326,89 +421,109 @@ export const StickyNote: React.FC<Props> = ({
           </div>
         </div>
         {deleteBtn}
-        {expandBtn}
         <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
       </div>
     );
   }
 
   return (
-    <div
-      ref={setNodeRef}
-      style={{
-        ...style,
-        backgroundColor: config.color,
-        color: config.textColor,
-        boxShadow: isSelected
-          ? '0 0 0 3px #3b82f6, 0 4px 12px rgba(0,0,0,0.3)'
-          : '0 2px 8px rgba(0,0,0,0.2)',
-        borderRadius: '6px',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '8px',
-        fontSize: `${14 / zoom}px`,
-      }}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-      onMouseDown={(e) => e.stopPropagation()}
-      {...(isEditing || isLinkingMode ? {} : { ...listeners, ...attributes })}
-    >
-      {!isDto && (
-        <div
-          style={{
-            fontSize: `${10 / zoom}px`,
-            fontWeight: 600,
-            opacity: 0.8,
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: '4px',
-            flexShrink: 0,
-          }}
-        >
-          {config.label}
-        </div>
-      )}
+    <>
+      <div
+        ref={(el) => {
+          setNodeRef(el);
+          (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
+        }}
+        style={{
+          ...style,
+          backgroundColor: config.color,
+          color: config.textColor,
+          boxShadow: isSelected
+            ? '0 0 0 3px #3b82f6, 0 4px 12px rgba(0,0,0,0.3)'
+            : '0 2px 8px rgba(0,0,0,0.2)',
+          borderRadius: '6px',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: '8px',
+          fontSize: '14px',
+        }}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        {...(isEditing || isLinkingMode ? {} : { ...listeners, ...attributes })}
+      >
+        {!isDto && (
+          <div
+            style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              opacity: 0.8,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              marginBottom: '4px',
+              flexShrink: 0,
+            }}
+          >
+            {config.label}
+          </div>
+        )}
 
-      {isEditing ? (
-        <textarea
-          ref={textareaRef}
-          value={editText}
-          onChange={(e) => setEditText(e.target.value)}
-          onBlur={handleBlur}
-          onKeyDown={handleKeyDown}
-          onClick={(e) => e.stopPropagation()}
-          style={{
-            flex: 1,
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            color: config.textColor,
-            fontSize: isDto ? '11px' : `${13 / zoom}px`,
-            resize: 'none',
-            cursor: 'text',
-            fontFamily: isDto ? '"Menlo", "Monaco", "Courier New", monospace' : 'inherit',
-          }}
+        {isEditing ? (
+          <textarea
+            ref={textareaRef}
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            onBlur={handleBlur}
+            onKeyDown={handleKeyDown}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              flex: 1,
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              color: textFormatStyles.color,
+              fontSize: isDto ? '11px' : (format.fontSize ? `${format.fontSize / zoom}px` : '13px'),
+              fontWeight: textFormatStyles.fontWeight,
+              fontStyle: textFormatStyles.fontStyle,
+              resize: 'none',
+              cursor: 'text',
+              fontFamily: isDto ? '"Menlo", "Monaco", "Courier New", monospace' : 'inherit',
+            }}
+          />
+        ) : isDto ? (
+          <DtoNoteBody label={note.label} textColor={config.textColor} />
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              fontSize: format.fontSize ? `${format.fontSize / zoom}px` : '13px',
+              fontWeight: textFormatStyles.fontWeight,
+              fontStyle: textFormatStyles.fontStyle,
+              color: textFormatStyles.color,
+              lineHeight: 1.4,
+              overflow: 'hidden',
+              wordBreak: 'break-word',
+            }}
+          >
+            {note.label || <span style={{ opacity: 0.5 }}>Double-click to edit</span>}
+          </div>
+        )}
+
+        <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
+        {resizeHandle}
+        {deleteBtn}
+        {domainEventActionBar}
+      </div>
+
+      {showFormatToolbar && noteScreenRect && (
+        <FormatToolbar
+          noteId={note.id}
+          format={format}
+          noteScreenRect={noteScreenRect}
+          onUpdate={(newFormat) => updateNote(note.id, { textFormat: newFormat })}
         />
-      ) : isDto ? (
-        <DtoNoteBody label={note.label} textColor={config.textColor} />
-      ) : (
-        <div
-          style={{
-            flex: 1,
-            fontSize: `${13 / zoom}px`,
-            lineHeight: 1.4,
-            overflow: 'hidden',
-            wordBreak: 'break-word',
-          }}
-        >
-          {note.label || <span style={{ opacity: 0.5 }}>Double-click to edit</span>}
-        </div>
       )}
-
-      <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
-      {resizeHandle}
-      {deleteBtn}
-      {expandBtn}
-    </div>
+    </>
   );
 };

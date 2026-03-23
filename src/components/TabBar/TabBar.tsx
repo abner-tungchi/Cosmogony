@@ -53,13 +53,13 @@ export const TabBar: React.FC = () => {
 
   // Event count statistics — reactive to activePath and activeBoard
   const totalEvents = activeBoard.notes.filter((n) => n.type === 'DomainEvent').length;
-  const totalBundles = activeBoard.bundles.length;
+  const totalNotes = activeBoard.notes.length;
   const visibleEvents = activePath !== null
     ? activeBoard.notes.filter((n) => n.type === 'DomainEvent' && n.paths?.includes(activePath)).length
     : totalEvents;
-  const visibleBundles = activePath !== null
-    ? activeBoard.bundles.filter((b) => b.paths?.includes(activePath)).length
-    : totalBundles;
+  const visibleNotes = activePath !== null
+    ? activeBoard.notes.filter((n) => n.paths?.includes(activePath)).length
+    : totalNotes;
   const showStats = currentView === 'board';
 
   return (
@@ -217,7 +217,7 @@ export const TabBar: React.FC = () => {
           >
             {visibleEvents} / {totalEvents} events
             <span style={{ margin: '0 6px', opacity: 0.4 }}>|</span>
-            {visibleBundles} / {totalBundles} bundles
+            {visibleNotes} / {totalNotes} notes
           </span>
         </div>
       )}
