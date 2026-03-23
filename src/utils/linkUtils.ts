@@ -18,6 +18,9 @@ const BUNDLE_H = SUB_NOTE_H * 2 + GAP;     // 248
 export const COLLAPSED_BUNDLE_W = 200;
 export const COLLAPSED_BUNDLE_H = 64;
 
+export const COLLAPSED_REMODEL_W = 200;
+export const COLLAPSED_REMODEL_H = 64;
+
 function getNoteBounds(note: StickyNote) {
   return {
     left: note.position.x,
@@ -43,14 +46,15 @@ function getBundleBounds(bundle: Bundle) {
 }
 
 function getRemodelBounds(remodel: Remodel) {
-  // Remodels are always expanded (same dimensions as expanded Bundle)
+  const w = remodel.collapsed ? COLLAPSED_REMODEL_W : BUNDLE_W;
+  const h = remodel.collapsed ? COLLAPSED_REMODEL_H : BUNDLE_H;
   return {
     left: remodel.position.x,
     top: remodel.position.y,
-    right: remodel.position.x + BUNDLE_W,
-    bottom: remodel.position.y + BUNDLE_H,
-    cx: remodel.position.x + BUNDLE_W / 2,
-    cy: remodel.position.y + BUNDLE_H / 2,
+    right: remodel.position.x + w,
+    bottom: remodel.position.y + h,
+    cx: remodel.position.x + w / 2,
+    cy: remodel.position.y + h / 2,
   };
 }
 
