@@ -139,6 +139,7 @@ export const BoardCanvas: React.FC<Props> = ({
           <Remodel
             key={remodel.id}
             remodel={remodel}
+            bundles={activeBoard.bundles}
             onLinkTarget={onLinkTarget}
             onDetailClick={(id) => onDetailClick(id, 'remodel')}
             activePath={activePath}
