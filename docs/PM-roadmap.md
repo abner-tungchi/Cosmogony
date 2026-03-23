@@ -963,9 +963,9 @@ Remodel 的 CRUD 操作和現有的 Bundle/Note 操作一致，透過 SSE 推播
 | 任務 ID | 標題 | 負責 Agent | 依賴 | 狀態 |
 |---------|------|-----------|------|------|
 | FE-012 | Remodel 資料模型修訂（returnTypeNote + linkedDtoIds + 收合狀態） | frontend-engineer | FE-009 | ✅ 完成 |
-| FE-013 | Remodel 視覺更新（配色 + 收合功能） | frontend-engineer | FE-012 | 待開發 |
-| FE-014 | Source Events 附屬區域 | frontend-engineer | FE-012 | 待開發 |
-| FE-015 | Dto StickyNote 元素 + Remodel 連動 | frontend-engineer | FE-012 | 待開發 |
+| FE-013 | Remodel 視覺更新（配色 + 收合功能） | frontend-engineer | FE-012 | ✅ 完成 |
+| FE-014 | Source Events 附屬區域 | frontend-engineer | FE-012 | ✅ 完成 |
+| FE-015 | Dto StickyNote 元素 + Remodel 連動 | frontend-engineer | FE-012 | ✅ 完成 |
 
 ---
 
