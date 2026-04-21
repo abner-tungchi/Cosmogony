@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { exportToMarkdown } from '../../utils/markdownExporter';
+import { exportBoardToJson } from '../../utils/jsonExporter';
 import { buildAiHandoffPrompt } from '../../utils/aiPromptBuilder';
 
 interface Props {
@@ -26,6 +27,18 @@ export const ExportModal: React.FC<Props> = ({ onClose }) => {
     const a = document.createElement('a');
     a.href = url;
     a.download = `${activeBoard.name.replace(/\s+/g, '_')}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadJson = () => {
+    const useCases = exportBoardToJson(activeBoard);
+    const jsonStr = JSON.stringify(useCases, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${activeBoard.name.replace(/\s+/g, '_')}_usecases.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -145,6 +158,21 @@ export const ExportModal: React.FC<Props> = ({ onClose }) => {
             }}
           >
             Download .md
+          </button>
+          <button
+            onClick={handleDownloadJson}
+            style={{
+              background: '#7c3aed',
+              border: 'none',
+              borderRadius: 8,
+              color: '#fff',
+              cursor: 'pointer',
+              padding: '8px 16px',
+              fontSize: 14,
+              fontWeight: 600,
+            }}
+          >
+            Download JSON
           </button>
         </div>
       </div>
