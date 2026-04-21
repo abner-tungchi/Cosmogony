@@ -27,6 +27,7 @@ const initialProject: Project = {
   boards: [initialBoard],
   activeBoardId: initialBoard.id,
   openBoardIds: [initialBoard.id],
+  customTypes: [],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -162,6 +163,16 @@ export const useBoardStore = create<BoardStore>()(
             note.updatedAt = new Date().toISOString();
             board.updatedAt = note.updatedAt;
             state.project.updatedAt = note.updatedAt;
+
+            // (Legacy) When an Entity with isAggregateRoot updates its label, sync the linked Aggregate note
+            // In the new flow, Entity is converted directly to Aggregate, so no separate sync needed
+            if (updates.label !== undefined && note.type === 'Entity' && note.isAggregateRoot && note.linkedAggregateNoteId) {
+              const aggNote = board.notes.find((n: StickyNote) => n.id === note.linkedAggregateNoteId);
+              if (aggNote) {
+                aggNote.label = updates.label;
+                aggNote.updatedAt = note.updatedAt;
+              }
+            }
           }
         }),
 
@@ -169,17 +180,50 @@ export const useBoardStore = create<BoardStore>()(
         set((state) => {
           const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
           if (!board) return;
-          // Clear commandId references on DomainEvent notes that point to this note
+
+          const noteToDelete = board.notes.find((n: StickyNote) => n.id === id);
+
+          // Collect IDs to delete (cascade for DomainEvent)
+          const idsToDelete = new Set<string>([id]);
+          if (noteToDelete?.type === 'DomainEvent') {
+            for (const note of board.notes) {
+              if (note.groupEventId === id) {
+                idsToDelete.add(note.id);
+              }
+            }
+          }
+
+          // (Legacy) If deleting an Entity with isAggregateRoot, cascade-delete its linked Aggregate note
+          if (noteToDelete?.type === 'Entity' && noteToDelete.isAggregateRoot && noteToDelete.linkedAggregateNoteId) {
+            idsToDelete.add(noteToDelete.linkedAggregateNoteId);
+          }
+
+          // If deleting an Aggregate note, clear entityId on all DomainEvents that reference it
+          if (noteToDelete?.type === 'Aggregate') {
+            for (const note of board.notes) {
+              if (note.type === 'DomainEvent' && note.entityId === id) {
+                note.entityId = undefined;
+              }
+              // (Legacy) clear isAggregateRoot on Entity notes
+              if (note.type === 'Entity' && note.linkedAggregateNoteId === id) {
+                note.isAggregateRoot = false;
+                note.linkedAggregateNoteId = undefined;
+              }
+            }
+          }
+
+          // Clear commandId/entityId references on DomainEvent notes that point to deleted notes
           for (const note of board.notes) {
-            if (note.commandId === id) {
+            if (note.commandId && idsToDelete.has(note.commandId)) {
               note.commandId = undefined;
             }
-            if (note.entityId === id) {
+            if (note.entityId && idsToDelete.has(note.entityId)) {
               note.entityId = undefined;
             }
           }
-          board.notes = board.notes.filter((n: StickyNote) => n.id !== id);
-          board.links = board.links.filter((l: Link) => l.fromId !== id && l.toId !== id);
+
+          board.notes = board.notes.filter((n: StickyNote) => !idsToDelete.has(n.id));
+          board.links = board.links.filter((l: Link) => !idsToDelete.has(l.fromId) && !idsToDelete.has(l.toId));
           board.updatedAt = new Date().toISOString();
           state.project.updatedAt = board.updatedAt;
         }),
@@ -223,37 +267,68 @@ export const useBoardStore = create<BoardStore>()(
           if (!eventNote || eventNote.type !== 'DomainEvent') return;
 
           const now = new Date().toISOString();
+          const commandNoteId = uuidv4();
+
           const commandNote: StickyNote = {
-            id: uuidv4(),
+            id: commandNoteId,
             type: 'Command',
             label: commandLabel,
             position: {
-              x: eventNote.position.x - 200,
+              x: eventNote.position.x - 176,
               y: eventNote.position.y,
             },
             size: { width: 160, height: 80 },
             zIndex: eventNote.zIndex,
             information,
+            groupEventId: eventNoteId,
             createdAt: now,
             updatedAt: now,
           };
 
           board.notes.push(commandNote);
 
-          // Link Command → DomainEvent
-          const link: Link = {
-            id: uuidv4(),
-            fromId: commandNote.id,
-            toId: eventNoteId,
-            fromType: 'note',
-            toType: 'note',
-            createdAt: now,
-          };
-          board.links.push(link);
+          // If information is non-empty, also create an Information note
+          if (information.length > 0) {
+            const infoNote: StickyNote = {
+              id: uuidv4(),
+              type: 'Information',
+              label: commandLabel + ' Info',
+              position: {
+                x: commandNote.position.x - 176,
+                y: commandNote.position.y,
+              },
+              size: { width: 160, height: 80 },
+              zIndex: eventNote.zIndex,
+              information: [...information],
+              groupEventId: eventNoteId,
+              informationForCommandId: commandNoteId,
+              createdAt: now,
+              updatedAt: now,
+            };
+            board.notes.push(infoNote);
+          }
 
-          // Update DomainEvent's commandId backref
-          eventNote.commandId = commandNote.id;
+          // Update DomainEvent's commandId backref (no Link record)
+          eventNote.commandId = commandNoteId;
           eventNote.updatedAt = now;
+
+          // Reposition any existing Entity note to the vertical center of the expanded group
+          // Group now includes: commandNote (x - 176), eventNote (x), and Entity note
+          const existingEntity = board.notes.find(
+            (n: StickyNote) => n.groupEventId === eventNoteId && n.type === 'Entity'
+          );
+          if (existingEntity) {
+            const NOTE_WIDTH = 160;
+            // Group spans from commandNote.position.x to eventNote.position.x + NOTE_WIDTH
+            const groupMinX = commandNote.position.x;
+            const groupMaxX = eventNote.position.x + NOTE_WIDTH;
+            const groupCenterX = (groupMinX + groupMaxX) / 2;
+            existingEntity.position = {
+              x: groupCenterX - NOTE_WIDTH / 2,
+              y: existingEntity.position.y,
+            };
+            existingEntity.updatedAt = now;
+          }
 
           board.updatedAt = now;
           state.project.updatedAt = now;
@@ -269,6 +344,15 @@ export const useBoardStore = create<BoardStore>()(
           note.updatedAt = new Date().toISOString();
           board.updatedAt = note.updatedAt;
           state.project.updatedAt = note.updatedAt;
+
+          // Sync the linked Information note so the green card on canvas stays current
+          const infoNote = board.notes.find(
+            (n: StickyNote) => n.informationForCommandId === commandId
+          );
+          if (infoNote) {
+            infoNote.information = information;
+            infoNote.updatedAt = note.updatedAt;
+          }
         }),
 
       updateEventProperties: (eventId, eventProperties) =>
@@ -293,6 +377,145 @@ export const useBoardStore = create<BoardStore>()(
           note.updatedAt = new Date().toISOString();
           board.updatedAt = note.updatedAt;
           state.project.updatedAt = note.updatedAt;
+        }),
+
+      addEntityForEvent: (eventNoteId, entityLabel) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const eventNote = board.notes.find((n: StickyNote) => n.id === eventNoteId);
+          if (!eventNote || eventNote.type !== 'DomainEvent') return;
+
+          const now = new Date().toISOString();
+
+          // Find all satellite notes for this event to compute group bounds
+          const groupNotes = board.notes.filter(
+            (n: StickyNote) => n.groupEventId === eventNoteId || n.id === eventNoteId
+          );
+
+          // Compute group x-center
+          const NOTE_WIDTH = 160;
+          const minX = Math.min(...groupNotes.map((n: StickyNote) => n.position.x));
+          const maxX = Math.max(...groupNotes.map((n: StickyNote) => n.position.x));
+          const groupCenterX = (minX + maxX + NOTE_WIDTH) / 2;
+
+          const entityNote: StickyNote = {
+            id: uuidv4(),
+            type: 'Entity',
+            label: entityLabel,
+            position: {
+              x: groupCenterX - NOTE_WIDTH / 2,
+              y: eventNote.position.y - 104, // 80px height + 24px gap above
+            },
+            size: { width: NOTE_WIDTH, height: 80 },
+            zIndex: eventNote.zIndex,
+            groupEventId: eventNoteId,
+            createdAt: now,
+            updatedAt: now,
+          };
+
+          board.notes.push(entityNote);
+
+          // Update DomainEvent's entityId backref
+          eventNote.entityId = entityNote.id;
+          eventNote.updatedAt = now;
+
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      linkEntityToAggregateRoot: (entityNoteId, aggregateRootId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
+          if (!note) return;
+          note.aggregateRootId = aggregateRootId;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      unlinkEntityFromAggregateRoot: (entityNoteId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
+          if (!note) return;
+          note.aggregateRootId = undefined;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      setEntityAsAggregateRoot: (entityNoteId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
+          if (!note || note.type !== 'Entity') return;
+
+          const now = new Date().toISOString();
+
+          // New behavior: convert Entity note type directly to Aggregate
+          // The entity keeps its position, groupEventId, and label unchanged
+          note.type = 'Aggregate';
+          note.isAggregateRoot = undefined;
+          note.linkedAggregateNoteId = undefined;
+          note.updatedAt = now;
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      unsetEntityAsAggregateRoot: (aggregateNoteId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === aggregateNoteId);
+          if (!note || note.type !== 'Aggregate') return;
+
+          const now = new Date().toISOString();
+
+          // Clear entityId references on all other DomainEvents that reference this Aggregate
+          // (i.e. groups that linked to this Aggregate but are NOT the original group)
+          for (const n of board.notes) {
+            if (n.type === 'DomainEvent' && n.entityId === aggregateNoteId && n.id !== note.groupEventId) {
+              n.entityId = undefined;
+              n.updatedAt = now;
+            }
+          }
+
+          // Convert this note back to Entity
+          note.type = 'Entity';
+          note.updatedAt = now;
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      linkEventToAggregate: (eventId, aggregateNoteId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const eventNote = board.notes.find((n: StickyNote) => n.id === eventId);
+          if (!eventNote || eventNote.type !== 'DomainEvent') return;
+
+          const now = new Date().toISOString();
+
+          // If this DomainEvent already has an entityId pointing to a satellite Entity note, delete that note
+          if (eventNote.entityId) {
+            const existingEntityNote = board.notes.find(
+              (n: StickyNote) => n.id === eventNote.entityId && n.groupEventId === eventId
+            );
+            if (existingEntityNote) {
+              board.notes = board.notes.filter((n: StickyNote) => n.id !== existingEntityNote.id);
+            }
+          }
+
+          // Point DomainEvent to the shared Aggregate note
+          eventNote.entityId = aggregateNoteId;
+          eventNote.updatedAt = now;
+          board.updatedAt = now;
+          state.project.updatedAt = now;
         }),
 
       addRemodel: (remodel) =>
@@ -358,10 +581,23 @@ export const useBoardStore = create<BoardStore>()(
           board.updatedAt = new Date().toISOString();
           state.project.updatedAt = board.updatedAt;
         }),
+
+      addCustomType: (typeName) =>
+        set((state) => {
+          const trimmed = typeName.trim();
+          if (!trimmed) return;
+          if (!state.project.customTypes) {
+            state.project.customTypes = [];
+          }
+          if (!state.project.customTypes.includes(trimmed)) {
+            state.project.customTypes.push(trimmed);
+            state.project.updatedAt = new Date().toISOString();
+          }
+        }),
     })),
     {
       name: 'event-storming-board',
-      version: 9,
+      version: 13,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -607,6 +843,77 @@ export const useBoardStore = create<BoardStore>()(
             }
           }
           return s as unknown as BoardStore;
+        }
+
+        if (version < 10) {
+          // v9 → v10: Add groupEventId to existing DomainEvent satellite notes
+          const s = persistedState as { project?: Project };
+          if (s.project) {
+            for (const board of s.project.boards) {
+              // For DomainEvent notes with commandId, set groupEventId on the Command note
+              for (const note of board.notes) {
+                if (note.type === 'DomainEvent' && note.commandId) {
+                  const commandNote = board.notes.find((n: StickyNote) => n.id === note.commandId);
+                  if (commandNote) {
+                    commandNote.groupEventId = note.id;
+                  }
+                }
+                // For DomainEvent notes with entityId, set groupEventId on the Entity/Aggregate note
+                if (note.type === 'DomainEvent' && note.entityId) {
+                  const entityNote = board.notes.find((n: StickyNote) => n.id === note.entityId);
+                  if (entityNote) {
+                    entityNote.groupEventId = note.id;
+                    // Promote Aggregate to Entity if referenced by a DomainEvent's entityId
+                    if (entityNote.type === 'Aggregate') {
+                      (entityNote as StickyNote).type = 'Entity';
+                    }
+                  }
+                }
+              }
+            }
+          }
+          return persistedState as BoardStore;
+        }
+
+        if (version < 11) {
+          // v10 → v11: Rename AggregateRoot type → Aggregate; migrate aggregateRootId links to isAggregateRoot/linkedAggregateNoteId
+          const s = persistedState as { project?: Project };
+          if (s.project) {
+            for (const board of s.project.boards) {
+              // Rename all AggregateRoot-typed notes to Aggregate
+              for (const note of board.notes) {
+                if ((note.type as string) === 'AggregateRoot') {
+                  (note as StickyNote).type = 'Aggregate';
+                }
+              }
+              // For each Entity with aggregateRootId, migrate to isAggregateRoot + linkedAggregateNoteId
+              for (const note of board.notes) {
+                if (note.type === 'Entity' && note.aggregateRootId) {
+                  const aggNote = board.notes.find((n: StickyNote) => n.id === note.aggregateRootId);
+                  if (aggNote) {
+                    note.isAggregateRoot = true;
+                    note.linkedAggregateNoteId = aggNote.id;
+                  }
+                  note.aggregateRootId = undefined;
+                }
+              }
+            }
+          }
+          return persistedState as BoardStore;
+        }
+
+        if (version < 12) {
+          // v11 → v12: add customTypes to project
+          const s = persistedState as { project?: Project };
+          if (s.project && !s.project.customTypes) {
+            s.project.customTypes = [];
+          }
+          return persistedState as BoardStore;
+        }
+
+        if (version < 13) {
+          // v12 → v13: add behavior field to DomainEvent notes (optional, no migration needed)
+          return persistedState as BoardStore;
         }
 
         return persistedState as BoardStore;

@@ -18,6 +18,7 @@ export interface Project {
   boards: Board[];
   activeBoardId: string;
   openBoardIds: string[];   // boards visible as tabs (subset of boards)
+  customTypes?: string[];   // user-defined types, shared across the project
   createdAt: string;
   updatedAt: string;
 }
@@ -64,6 +65,12 @@ export interface BoardStore {
   updateCommandInformation: (commandId: string, information: Property[]) => void;
   updateEventProperties: (eventId: string, eventProperties: Property[]) => void;
   linkEntityToEvent: (eventId: string, entityId: string | undefined) => void;
+  addEntityForEvent: (eventNoteId: string, entityLabel: string) => void;
+  linkEntityToAggregateRoot: (entityNoteId: string, aggregateRootId: string) => void;
+  unlinkEntityFromAggregateRoot: (entityNoteId: string) => void;
+  setEntityAsAggregateRoot: (entityNoteId: string) => void;
+  unsetEntityAsAggregateRoot: (aggregateNoteId: string) => void;
+  linkEventToAggregate: (eventId: string, aggregateNoteId: string) => void;
 
   // Remodel management (active board)
   addRemodel: (remodel: Remodel) => void;
@@ -74,4 +81,7 @@ export interface BoardStore {
   addFlowPath: (flowPath: FlowPath) => void;
   updateFlowPath: (id: string, updates: Partial<FlowPath>) => void;
   deleteFlowPath: (id: string) => void;
+
+  // Custom types (project-level)
+  addCustomType: (typeName: string) => void;
 }

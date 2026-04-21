@@ -9,14 +9,16 @@ import {
 import type { DragEndEvent, DragStartEvent, DropAnimation } from '@dnd-kit/core';
 import { v4 as uuidv4 } from 'uuid';
 import { BoardCanvas } from './BoardCanvas';
+import { CollapsedChip } from './CollapsedChip';
+import type { GroupBox } from './CollapsedChip';
 import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { Minimap } from './Minimap';
 import { AddCommandModal } from '../Modals/AddCommandModal';
+import { SetEntityModal } from '../Modals/SetEntityModal';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
-import type { StickyNote as StickyNoteType, Remodel, Property } from '../../types/elements';
+import type { StickyNote as StickyNoteType, Property } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
-import { screenToCanvas } from '../../utils/positionUtils';
 import { COLLAPSED_REMODEL_W, COLLAPSED_REMODEL_H } from '../../utils/linkUtils';
 
 const DRAG_DROP_ANIMATION: DropAnimation = {
@@ -36,10 +38,10 @@ const DRAG_DROP_ANIMATION: DropAnimation = {
 };
 
 export const Board: React.FC = () => {
-  const { addNote, updateNote, addRemodel, updateRemodel, addLink, addCommandForEvent, linkEntityToEvent } = useBoardStore();
+  const { updateNote, updateRemodel, addLink, addCommandForEvent, updateCommandInformation, addEntityForEvent, linkEntityToEvent } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
   const {
-    zoom, panX, panY, setPan, activeToolType, setActiveToolType,
+    zoom, panX, panY, setPan,
     selectedNoteIds, setSelectedNoteIds, toggleNoteSelection,
     isLinkingMode, linkFromId, linkFromType, setLinkFrom, setLinkingMode,
     setSelectedElement, activePath,
@@ -54,8 +56,8 @@ export const Board: React.FC = () => {
   // Modal for adding a Command to a DomainEvent
   const [addCommandForEventId, setAddCommandForEventId] = useState<string | null>(null);
 
-  // "Set Entity" click mode: when active, clicking an Aggregate note links it to this event
-  const [pendingEntityLinkForEventId, setPendingEntityLinkForEventId] = useState<string | null>(null);
+  // Modal for setting an Entity on a DomainEvent
+  const [setEntityForEventId, setSetEntityForEventId] = useState<string | null>(null);
 
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: window.innerWidth, height: window.innerHeight });
@@ -77,19 +79,30 @@ export const Board: React.FC = () => {
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
+  // Resolve a note ID to its group anchor (DomainEvent) if it's a satellite
+  const resolveGroupAnchor = useCallback((id: string, type: 'note' | 'remodel'): string => {
+    if (type !== 'note') return id;
+    const note = activeBoard.notes.find((n) => n.id === id);
+    return note?.groupEventId ?? id;
+  }, [activeBoard.notes]);
+
   const handleLinkTarget = useCallback((targetId: string, targetType: 'note' | 'remodel') => {
     if (!linkFromId || !linkFromType) {
-      setLinkFrom(targetId, targetType);
+      const resolvedId = resolveGroupAnchor(targetId, targetType);
+      setLinkFrom(resolvedId, targetType);
     } else {
-      if (targetId === linkFromId) {
+      const resolvedTargetId = resolveGroupAnchor(targetId, targetType);
+      const resolvedFromId = resolveGroupAnchor(linkFromId, linkFromType);
+
+      if (resolvedTargetId === resolvedFromId) {
         setLinkFrom(null, null);
         return;
       }
 
       addLink({
         id: uuidv4(),
-        fromId: linkFromId,
-        toId: targetId,
+        fromId: resolvedFromId,
+        toId: resolvedTargetId,
         fromType: linkFromType,
         toType: targetType,
         createdAt: new Date().toISOString(),
@@ -100,11 +113,11 @@ export const Board: React.FC = () => {
       let linkedNoteId: string | null = null;
 
       if (linkFromType === 'remodel' && targetType === 'note') {
-        remodelId = linkFromId;
-        linkedNoteId = targetId;
+        remodelId = resolvedFromId;
+        linkedNoteId = resolvedTargetId;
       } else if (linkFromType === 'note' && targetType === 'remodel') {
-        remodelId = targetId;
-        linkedNoteId = linkFromId;
+        remodelId = resolvedTargetId;
+        linkedNoteId = resolvedFromId;
       }
 
       if (remodelId && linkedNoteId) {
@@ -134,26 +147,6 @@ export const Board: React.FC = () => {
     }
   }, [linkFromId, linkFromType, addLink, setLinkFrom, setLinkingMode, activeBoard.remodels, activeBoard.notes, updateRemodel]);
 
-  // Handle "Set Entity" mode: clicking an Aggregate note links it to the pending event
-  const handleNoteClickInEntityMode = useCallback((noteId: string) => {
-    if (!pendingEntityLinkForEventId) return;
-    const clickedNote = activeBoard.notes.find((n) => n.id === noteId);
-    if (!clickedNote || clickedNote.type !== 'Aggregate') return;
-
-    linkEntityToEvent(pendingEntityLinkForEventId, noteId);
-
-    // Create a visual link from Aggregate → DomainEvent
-    addLink({
-      id: uuidv4(),
-      fromId: noteId,
-      toId: pendingEntityLinkForEventId,
-      fromType: 'note',
-      toType: 'note',
-      createdAt: new Date().toISOString(),
-    });
-
-    setPendingEntityLinkForEventId(null);
-  }, [pendingEntityLinkForEventId, activeBoard.notes, linkEntityToEvent, addLink]);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (e.button === 1 || e.button === 2) {
@@ -164,12 +157,6 @@ export const Board: React.FC = () => {
     }
 
     if (e.button === 0) {
-      // Cancel pending entity link mode if clicking empty canvas
-      if (pendingEntityLinkForEventId && (e.target as HTMLElement) === e.currentTarget) {
-        setPendingEntityLinkForEventId(null);
-        return;
-      }
-
       if (isLinkingMode) {
         if ((e.target as HTMLElement) === e.currentTarget) {
           setLinkFrom(null, null);
@@ -179,59 +166,9 @@ export const Board: React.FC = () => {
       }
 
       setSelectedNoteIds([]);
-      if (!activeToolType) {
-        setSelectedElement(null, null);
-        return;
-      }
-
-      const canvasPos = screenToCanvas(e.clientX, e.clientY, panX, panY, zoom);
-
-      if (activeToolType === 'Remodel') {
-        const newRemodel: Remodel = {
-          id: uuidv4(),
-          position: {
-            x: canvasPos.x - (160 * 3 + 8 * 2) / 2,
-            y: canvasPos.y - (120 * 2 + 8) / 2,
-          },
-          aggregateNote: { label: '', content: '' },
-          parameterNote: { label: '', content: '' },
-          queryNote: { label: '', content: '' },
-          returnTypeNote: { label: '', content: '' },
-          linkedBundleIds: [],
-          linkedDtoIds: [],
-          zIndex: 10 + activeBoard.remodels.length,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-        addRemodel(newRemodel);
-        setActiveToolType(null);
-        return;
-      }
-
-      const config = ELEMENT_CONFIGS[activeToolType as keyof typeof ELEMENT_CONFIGS];
-      if (!config) return;
-
-      const DEFAULT_DTO_LABEL = '[DtoName]\n----------\nfield: Type';
-      const noteLabel = activeToolType === 'Dto' ? DEFAULT_DTO_LABEL : config.label;
-
-      const newNote: StickyNoteType = {
-        id: uuidv4(),
-        type: activeToolType as StickyNoteType['type'],
-        label: noteLabel,
-        position: {
-          x: canvasPos.x - config.defaultSize.width / 2,
-          y: canvasPos.y - config.defaultSize.height / 2,
-        },
-        size: config.defaultSize,
-        zIndex: 10 + activeBoard.notes.length,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      addNote(newNote);
-      setActiveToolType(null);
+      setSelectedElement(null, null);
     }
-  }, [zoom, panX, panY, activeToolType, setActiveToolType, activeBoard, addNote, addRemodel, setSelectedNoteIds, isLinkingMode, setLinkFrom, setLinkingMode, pendingEntityLinkForEventId]);
+  }, [panX, panY, setSelectedNoteIds, isLinkingMode, setLinkFrom, setLinkingMode, setSelectedElement]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isPanningRef.current) {
@@ -271,10 +208,23 @@ export const Board: React.FC = () => {
     const note = activeBoard.notes.find((n) => n.id === id);
     if (note) {
       positions[id] = { ...note.position };
+
+      // Collect group members: if dragging a satellite, include DomainEvent anchor + all siblings
+      // If dragging a DomainEvent, include all satellites
+      const groupEventId = note.groupEventId ?? (note.type === 'DomainEvent' ? note.id : null);
+      if (groupEventId) {
+        for (const n of activeBoard.notes) {
+          if (n.id !== id && (n.groupEventId === groupEventId || n.id === groupEventId)) {
+            positions[n.id] = { ...n.position };
+          }
+        }
+      }
+
+      // Also include manually multi-selected notes
       if (selectedNoteIds.includes(id)) {
         for (const selId of selectedNoteIds) {
           const selNote = activeBoard.notes.find((n) => n.id === selId);
-          if (selNote) positions[selId] = { ...selNote.position };
+          if (selNote && !positions[selId]) positions[selId] = { ...selNote.position };
         }
       }
     }
@@ -282,9 +232,11 @@ export const Board: React.FC = () => {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    setActiveDragId(null);
     const { delta } = event;
-    if (!event.active) return;
+    if (!event.active) {
+      setActiveDragId(null);
+      return;
+    }
 
     const id = String(event.active.id);
     const scaledDx = delta.x / zoom;
@@ -298,13 +250,18 @@ export const Board: React.FC = () => {
         });
         draggedRemodelStart.current = null;
       }
+      // Delay clearing activeDragId so position updates are applied before overlay disappears
+      requestAnimationFrame(() => {
+        setActiveDragId(null);
+      });
       return;
     }
 
     const startPositions = draggedNoteStartPositions.current;
-    const notesToMove = [id, ...selectedNoteIds.filter((s) => s !== id)];
+    // Move all collected positions (group members + multi-selection)
+    const allNoteIds = Object.keys(startPositions);
 
-    for (const noteId of notesToMove) {
+    for (const noteId of allNoteIds) {
       const startPos = startPositions[noteId];
       if (!startPos) continue;
       updateNote(noteId, {
@@ -313,6 +270,11 @@ export const Board: React.FC = () => {
     }
 
     draggedNoteStartPositions.current = {};
+
+    // Delay clearing activeDragId so position updates are applied before overlay disappears
+    requestAnimationFrame(() => {
+      setActiveDragId(null);
+    });
   };
 
   const activeNote = activeDragId && !activeDragId.startsWith('remodel-')
@@ -324,11 +286,6 @@ export const Board: React.FC = () => {
     : null;
 
   const handleNoteSelect = (id: string, multi: boolean) => {
-    // In "Set Entity" mode, clicking an Aggregate note links it
-    if (pendingEntityLinkForEventId) {
-      handleNoteClickInEntityMode(id);
-      return;
-    }
     if (multi) {
       toggleNoteSelection(id);
     } else {
@@ -342,21 +299,57 @@ export const Board: React.FC = () => {
 
   const handleConfirmAddCommand = useCallback((commandLabel: string, information: Property[]) => {
     if (!addCommandForEventId) return;
-    addCommandForEvent(addCommandForEventId, commandLabel, information);
+    const eventNote = activeBoard.notes.find((n) => n.id === addCommandForEventId);
+    if (eventNote?.commandId) {
+      // Editing an existing command: update label and information in place
+      updateNote(eventNote.commandId, { label: commandLabel });
+      updateCommandInformation(eventNote.commandId, information);
+    } else {
+      addCommandForEvent(addCommandForEventId, commandLabel, information);
+      // Task 7: copy Information params to DomainEvent's eventProperties as defaults,
+      // only if the event has no existing eventProperties set
+      if (information.length > 0 && (!eventNote?.eventProperties || eventNote.eventProperties.length === 0)) {
+        updateNote(addCommandForEventId, { eventProperties: information });
+      }
+    }
     setAddCommandForEventId(null);
-  }, [addCommandForEventId, addCommandForEvent]);
+  }, [addCommandForEventId, activeBoard.notes, addCommandForEvent, updateNote, updateCommandInformation]);
 
   const handleSetEntityForEvent = useCallback((eventNoteId: string) => {
-    setPendingEntityLinkForEventId(eventNoteId);
+    setSetEntityForEventId(eventNoteId);
   }, []);
+
+  const handleConfirmSetEntity = useCallback((entityLabel: string) => {
+    if (!setEntityForEventId) return;
+    addEntityForEvent(setEntityForEventId, entityLabel);
+    setSetEntityForEventId(null);
+  }, [setEntityForEventId, addEntityForEvent]);
+
+  const handleLinkExistingEntity = useCallback((entityNoteId: string) => {
+    if (!setEntityForEventId) return;
+    linkEntityToEvent(setEntityForEventId, entityNoteId);
+    setSetEntityForEventId(null);
+  }, [setEntityForEventId, linkEntityToEvent]);
 
   const addCommandEventNote = addCommandForEventId
     ? activeBoard.notes.find((n) => n.id === addCommandForEventId)
     : null;
 
+  // When editing an already-linked command, look up its current values for pre-filling
+  const existingCommandNote = addCommandEventNote?.commandId
+    ? activeBoard.notes.find((n) => n.id === addCommandEventNote.commandId)
+    : null;
+
+  const setEntityEventNote = setEntityForEventId
+    ? activeBoard.notes.find((n) => n.id === setEntityForEventId)
+    : null;
+
   return (
     <>
-    <DetailPanel />
+    <DetailPanel
+      onAddCommand={handleAddCommandForEvent}
+      onSetEntity={handleSetEntityForEvent}
+    />
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}
@@ -370,19 +363,14 @@ export const Board: React.FC = () => {
           inset: 0,
           overflow: 'hidden',
           background: '#f8fafc',
-          cursor: pendingEntityLinkForEventId
-            ? 'crosshair'
-            : isLinkingMode
-            ? 'crosshair'
-            : activeToolType
-            ? 'crosshair'
-            : 'default',
+          cursor: isLinkingMode ? 'crosshair' : 'default',
         }}
         onMouseDown={handleCanvasMouseDown}
         onContextMenu={(e) => e.preventDefault()}
       >
         <BoardCanvas
           selectedNoteIds={selectedNoteIds}
+          activeDragId={activeDragId}
           onNoteSelect={handleNoteSelect}
           onLinkTarget={handleLinkTarget}
           onDetailClick={setSelectedElement}
@@ -390,105 +378,138 @@ export const Board: React.FC = () => {
           onSetEntity={handleSetEntityForEvent}
         />
 
-        {/* Set Entity mode indicator */}
-        {pendingEntityLinkForEventId && (
-          <div style={{
-            position: 'absolute',
-            top: 16,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            background: '#1e293b',
-            color: '#fbbf24',
-            borderRadius: 8,
-            padding: '8px 16px',
-            fontSize: 13,
-            fontWeight: 600,
-            zIndex: 200,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-            border: '1px solid rgba(251,191,36,0.3)',
-          }}>
-            <span>Click an Aggregate note to link as Entity</span>
-            <button
-              onClick={() => setPendingEntityLinkForEventId(null)}
-              style={{
-                background: 'rgba(255,255,255,0.1)',
-                border: 'none',
-                borderRadius: 4,
-                color: 'white',
-                cursor: 'pointer',
-                fontSize: 13,
-                padding: '2px 8px',
-              }}
-            >
-              Cancel
-            </button>
-          </div>
-        )}
       </div>
 
       <DragOverlay dropAnimation={DRAG_DROP_ANIMATION}>
         {activeNote && (() => {
-          const cfg = ELEMENT_CONFIGS[activeNote.type];
-          const w = activeNote.size.width * zoom;
-          const h = activeNote.size.height * zoom;
           const DRAG_TRANSFORM = 'scale(1.05) rotate(1.5deg)';
           const DRAG_SHADOW = '0 8px 24px rgba(0,0,0,0.2)';
-          if (activeNote.type === 'Diamond') {
+
+          // Check if the dragged note is a collapsed group anchor
+          const isCollapsedAnchor = activeNote.groupCollapsed === true;
+
+          if (isCollapsedAnchor) {
+            // Build a minimal GroupBox for the CollapsedChip overlay
+            const chipBox: GroupBox = {
+              x: activeNote.position.x,
+              y: activeNote.position.y,
+              width: 200,
+              height: 40,
+              groupEventId: activeNote.id,
+              anchorLabel: activeNote.label,
+              collapsed: true,
+              anchorNote: activeNote,
+            };
             return (
               <div style={{
-                width: w,
-                height: h,
                 opacity: 0.45,
-                position: 'relative',
-                transform: DRAG_TRANSFORM,
-                filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.2))',
+                transform: `scale(${zoom}) ${DRAG_TRANSFORM}`,
+                transformOrigin: 'top left',
               }}>
-                <div style={{
-                  width: w,
-                  height: h,
-                  transform: 'rotate(45deg)',
-                  backgroundColor: cfg.color,
-                  borderRadius: 8 * zoom,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  <div style={{
-                    transform: 'rotate(-45deg)',
-                    color: cfg.textColor,
-                    fontSize: 12 * zoom,
-                    textAlign: 'center',
-                    padding: 8,
-                    width: '80%',
-                    wordBreak: 'break-word',
-                  }}>
-                    {activeNote.label}
-                  </div>
-                </div>
+                <CollapsedChip
+                  box={chipBox}
+                  notes={activeBoard.notes}
+                  isSelected={false}
+                  isDimmed={false}
+                  onExpand={() => {}}
+                  onSelect={() => {}}
+                  onDetailClick={() => {}}
+                />
               </div>
             );
           }
+
+          // Collect all notes in the same group for rendering
+          const groupEventId = activeNote.groupEventId ?? (activeNote.type === 'DomainEvent' ? activeNote.id : null);
+          const groupNotes: StickyNoteType[] = groupEventId
+            ? activeBoard.notes.filter(
+                (n) => n.id === groupEventId || n.groupEventId === groupEventId
+              )
+            : [activeNote];
+
+          const renderNote = (note: StickyNoteType, offsetX: number, offsetY: number) => {
+            const cfg = ELEMENT_CONFIGS[note.type];
+            const w = note.size.width * zoom;
+            const h = note.size.height * zoom;
+
+            if (note.type === 'Diamond') {
+              return (
+                <div
+                  key={note.id}
+                  style={{
+                    position: 'absolute',
+                    left: offsetX,
+                    top: offsetY,
+                    width: w,
+                    height: h,
+                    filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.2))',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  <div style={{
+                    width: w,
+                    height: h,
+                    transform: 'rotate(45deg)',
+                    backgroundColor: cfg.color,
+                    borderRadius: 8 * zoom,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <div style={{
+                      transform: 'rotate(-45deg)',
+                      color: cfg.textColor,
+                      fontSize: 12 * zoom,
+                      textAlign: 'center',
+                      padding: 8,
+                      width: '80%',
+                      wordBreak: 'break-word',
+                    }}>
+                      {note.label}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={note.id}
+                style={{
+                  position: 'absolute',
+                  left: offsetX,
+                  top: offsetY,
+                  width: w,
+                  height: h,
+                  backgroundColor: cfg.color,
+                  color: cfg.textColor,
+                  borderRadius: 6,
+                  padding: 8,
+                  fontSize: 13 * zoom,
+                  boxShadow: DRAG_SHADOW,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 600,
+                  pointerEvents: 'none',
+                }}
+              >
+                {note.label}
+              </div>
+            );
+          };
+
           return (
             <div style={{
-              width: w,
-              height: h,
-              backgroundColor: cfg.color,
-              color: cfg.textColor,
-              borderRadius: 6,
-              padding: 8,
-              fontSize: 13 * zoom,
-              boxShadow: DRAG_SHADOW,
+              position: 'relative',
               opacity: 0.45,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 600,
               transform: DRAG_TRANSFORM,
             }}>
-              {activeNote.label}
+              {groupNotes.map((note) => {
+                const offsetX = (note.position.x - activeNote.position.x) * zoom;
+                const offsetY = (note.position.y - activeNote.position.y) * zoom;
+                return renderNote(note, offsetX, offsetY);
+              })}
             </div>
           );
         })()}
@@ -576,8 +597,23 @@ export const Board: React.FC = () => {
       isOpen={addCommandForEventId !== null}
       eventNoteId={addCommandForEventId ?? ''}
       eventNoteLabel={addCommandEventNote?.label ?? ''}
+      initialLabel={existingCommandNote?.label}
+      initialInformation={existingCommandNote?.information}
       onConfirm={handleConfirmAddCommand}
       onClose={() => setAddCommandForEventId(null)}
+    />
+
+    {/* Set Entity Modal */}
+    <SetEntityModal
+      isOpen={setEntityForEventId !== null}
+      eventNoteId={setEntityForEventId ?? ''}
+      eventNoteLabel={setEntityEventNote?.label ?? ''}
+      existingEntities={activeBoard.notes
+        .filter((n) => n.type === 'Entity')
+        .map((n) => ({ id: n.id, label: n.label, type: n.type }))}
+      onConfirm={handleConfirmSetEntity}
+      onLinkExisting={handleLinkExistingEntity}
+      onClose={() => setSetEntityForEventId(null)}
     />
     </>
   );

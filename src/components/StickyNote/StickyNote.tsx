@@ -5,7 +5,6 @@ import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { PathDots } from '../PathBar/PathDots';
-import { FormatToolbar } from './FormatToolbar';
 
 // ─── Dto Note Body ────────────────────────────────────────────────────────────
 
@@ -68,7 +67,10 @@ interface Props {
   allPaths?: FlowPath[];
   onAddCommand?: (eventNoteId: string) => void;
   onSetEntity?: (eventNoteId: string) => void;
+  onHoverChange?: (id: string | null) => void;
   allNotes?: StickyNoteType[];
+  /** When true, this note is a ghost/mirror instance and cannot be dragged or interacted with */
+  isDragDisabled?: boolean;
 }
 
 export const StickyNote: React.FC<Props> = ({
@@ -80,10 +82,11 @@ export const StickyNote: React.FC<Props> = ({
   activePath = null,
   allPaths = [],
   onAddCommand,
-  onSetEntity,
+  onHoverChange,
   allNotes = [],
+  isDragDisabled = false,
 }) => {
-  const { zoom, isLinkingMode } = useUIStore();
+  const { zoom, isLinkingMode, selectedNoteIds: uiSelectedIds } = useUIStore();
 
   const isDimmed =
     activePath !== null &&
@@ -93,24 +96,27 @@ export const StickyNote: React.FC<Props> = ({
   const [editText, setEditText] = useState(note.label);
   const [isHovered, setIsHovered] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<{ startX: number; startY: number; startW: number; startH: number } | null>(null);
 
-  const config = ELEMENT_CONFIGS[note.type];
+  // Group satellite: notes that belong to a DomainEvent group (have groupEventId set)
+  const isGroupSatellite = !!note.groupEventId;
+  const isGroupDomainEventSelected = isGroupSatellite && uiSelectedIds.includes(note.groupEventId!);
+
+  const config = ELEMENT_CONFIGS[note.type] ?? ELEMENT_CONFIGS['DomainEvent'];
   const isDiamond = note.type === 'Diamond';
   const isDto = note.type === 'Dto';
   const isDomainEvent = note.type === 'DomainEvent';
+  const isEntity = note.type === 'Entity';
+  const isAggregate = note.type === 'Aggregate';
+  const isEntityAggregateRoot = isEntity && note.isAggregateRoot === true;
+  const isInformation = note.type === 'Information';
 
-  // FormatToolbar is only shown for non-Diamond, non-Dto note types
-  const showFormatToolbar = isSelected && !isLinkingMode && !isDiamond && !isDto;
   const format: TextFormat = note.textFormat ?? {};
 
-  const noteScreenRect = wrapperRef.current?.getBoundingClientRect() ?? null;
-
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: note.id,
+    id: isDragDisabled ? `ghost-${note.id}` : note.id,
     data: { type: 'note', note },
-    disabled: isLinkingMode || isEditing,
+    disabled: isLinkingMode || isEditing || isDragDisabled,
   });
 
   const dimTransform = isDimmed ? ' scale(0.97)' : '';
@@ -131,14 +137,15 @@ export const StickyNote: React.FC<Props> = ({
     opacity: isDragging ? 0 : isDimmed ? 0.15 : 1,
     filter: isDimmed ? 'saturate(0.3)' : undefined,
     transform: baseTransform,
-    cursor: isDimmed ? 'default' : isLinkingMode ? 'pointer' : (isDragging ? 'grabbing' : 'grab'),
-    pointerEvents: isDimmed ? 'none' : 'auto',
+    cursor: isDragDisabled ? 'default' : isDimmed ? 'default' : isLinkingMode ? 'pointer' : (isDragging ? 'grabbing' : 'grab'),
+    pointerEvents: isDragDisabled ? 'none' : isDimmed ? 'none' : 'auto',
     userSelect: 'none',
     transition: isDragging ? 'none' : 'opacity 200ms ease, transform 200ms ease, filter 200ms ease, box-shadow 0.15s',
   };
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (isLinkingMode) return;
+    if (isGroupSatellite) return; // Group satellites: edit only via sidebar
     e.stopPropagation();
     setIsEditing(true);
     setEditText(note.label);
@@ -178,6 +185,12 @@ export const StickyNote: React.FC<Props> = ({
     e.stopPropagation();
     if (isLinkingMode) {
       onLinkClick?.(note.id, 'note');
+      return;
+    }
+    if (isGroupSatellite && !isGroupDomainEventSelected) {
+      // First click on satellite: select the group (DomainEvent as representative)
+      onSelect(note.groupEventId!, e.shiftKey);
+      onDetailClick?.(note.groupEventId!);
     } else {
       onSelect(note.id, e.shiftKey);
       onDetailClick?.(note.id);
@@ -272,40 +285,36 @@ export const StickyNote: React.FC<Props> = ({
   const linkedCommandNote = isDomainEvent && note.commandId
     ? allNotes.find((n) => n.id === note.commandId)
     : undefined;
-  const linkedEntityNote = isDomainEvent && note.entityId
-    ? allNotes.find((n) => n.id === note.entityId)
-    : undefined;
 
   const showActionBar = isDomainEvent && !isLinkingMode && !isDimmed && (isHovered || isSelected);
 
-  const domainEventActionBar = showActionBar && (
+  // Action bar only shows "+ Command" button (when no command linked yet)
+  // "Set Entity" is rendered as a canvas overlay in BoardCanvas.tsx
+  const domainEventActionBar = showActionBar && !linkedCommandNote && (
     <div
       style={{
         position: 'absolute',
-        bottom: -32,
-        left: 0,
-        right: 0,
-        display: 'flex',
-        gap: 4,
-        justifyContent: 'center',
+        left: -8,
+        top: '50%',
+        transform: 'translateX(-100%) translateY(-50%)',
         zIndex: 10001,
         pointerEvents: 'auto',
       }}
       onMouseDown={(e) => e.stopPropagation()}
     >
-      {/* Add/View Command button */}
+      {/* Add Command button — only if no commandId */}
       <button
         onClick={(e) => {
           e.stopPropagation();
           onAddCommand?.(note.id);
         }}
-        title={linkedCommandNote ? `Command: ${linkedCommandNote.label}` : 'Add Command'}
+        title="Add Command"
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 4,
           padding: '3px 8px',
-          background: linkedCommandNote ? 'rgba(30,136,229,0.9)' : 'rgba(30,136,229,0.7)',
+          background: 'rgba(30,136,229,0.7)',
           border: '1px solid rgba(30,136,229,0.9)',
           borderRadius: 4,
           color: '#fff',
@@ -317,34 +326,7 @@ export const StickyNote: React.FC<Props> = ({
           backdropFilter: 'blur(4px)',
         }}
       >
-        {linkedCommandNote ? `⊡ ${linkedCommandNote.label || 'Command'}` : '+ Command'}
-      </button>
-
-      {/* Set Entity button */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onSetEntity?.(note.id);
-        }}
-        title={linkedEntityNote ? `Entity: ${linkedEntityNote.label}` : 'Set Aggregate Entity'}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          padding: '3px 8px',
-          background: linkedEntityNote ? 'rgba(255,214,0,0.9)' : 'rgba(100,116,139,0.7)',
-          border: `1px solid ${linkedEntityNote ? 'rgba(255,214,0,0.9)' : 'rgba(100,116,139,0.7)'}`,
-          borderRadius: 4,
-          color: linkedEntityNote ? '#1e293b' : '#fff',
-          fontSize: 11,
-          fontWeight: 600,
-          cursor: 'pointer',
-          whiteSpace: 'nowrap',
-          fontFamily: 'inherit',
-          backdropFilter: 'blur(4px)',
-        }}
-      >
-        {linkedEntityNote ? `◆ ${linkedEntityNote.label || 'Entity'}` : 'Set Entity'}
+        + Command
       </button>
     </div>
   );
@@ -426,34 +408,38 @@ export const StickyNote: React.FC<Props> = ({
     );
   }
 
+  // Entity: display label is always the note's own label
+  const entityDisplayLabel = note.label;
+
   return (
     <>
       <div
-        ref={(el) => {
-          setNodeRef(el);
-          (wrapperRef as React.MutableRefObject<HTMLDivElement | null>).current = el;
-        }}
+        ref={setNodeRef}
         style={{
           ...style,
           backgroundColor: config.color,
           color: config.textColor,
           boxShadow: isSelected
             ? '0 0 0 3px #3b82f6, 0 4px 12px rgba(0,0,0,0.3)'
+            : (isAggregate || isEntityAggregateRoot)
+            ? '0 0 0 3px #b8860b, 0 2px 8px rgba(0,0,0,0.2)'
             : '0 2px 8px rgba(0,0,0,0.2)',
+          border: (isAggregate || isEntityAggregateRoot) ? '3px solid #b8860b' : undefined,
           borderRadius: '6px',
           display: 'flex',
           flexDirection: 'column',
           padding: '8px',
           fontSize: '14px',
+          boxSizing: 'border-box',
         }}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
         onMouseDown={(e) => e.stopPropagation()}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={() => { setIsHovered(true); onHoverChange?.(note.id); }}
+        onMouseLeave={() => { setIsHovered(false); onHoverChange?.(null); }}
         {...(isEditing || isLinkingMode ? {} : { ...listeners, ...attributes })}
       >
-        {!isDto && (
+        {!isDto && !isInformation && (
           <div
             style={{
               fontSize: '10px',
@@ -493,6 +479,41 @@ export const StickyNote: React.FC<Props> = ({
           />
         ) : isDto ? (
           <DtoNoteBody label={note.label} textColor={config.textColor} />
+        ) : isInformation ? (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {/* Information type label */}
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 600,
+              opacity: 0.8,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              marginBottom: '4px',
+              color: config.textColor,
+            }}>
+              {config.label}
+            </div>
+            {/* Property list */}
+            {(note.information ?? []).length > 0 ? (
+              <div style={{
+                fontSize: '10px',
+                lineHeight: 1.6,
+                color: config.textColor,
+                overflow: 'hidden',
+              }}>
+                {(note.information ?? []).map((prop, i) => (
+                  <div key={i} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ opacity: 0.7 }}>{prop.attrName}</span>
+                    {prop.type && <span style={{ opacity: 0.5 }}>: {prop.type}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: '11px', opacity: 0.5, fontStyle: 'italic' }}>
+                {note.label || 'Information'}
+              </div>
+            )}
+          </div>
         ) : (
           <div
             style={{
@@ -504,26 +525,45 @@ export const StickyNote: React.FC<Props> = ({
               lineHeight: 1.4,
               overflow: 'hidden',
               wordBreak: 'break-word',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
             }}
           >
-            {note.label || <span style={{ opacity: 0.5 }}>Double-click to edit</span>}
+            <span>{entityDisplayLabel || <span style={{ opacity: 0.5 }}>Double-click to edit</span>}</span>
+            {isDomainEvent && (note.eventProperties ?? []).length > 0 && (
+              <div style={{
+                marginTop: 4,
+                fontSize: '10px',
+                lineHeight: 1.5,
+                opacity: 0.75,
+                overflow: 'hidden',
+              }}>
+                {(note.eventProperties ?? []).map((prop, i) => (
+                  <div key={i} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ opacity: 0.85 }}>{prop.attrName}</span>
+                    {prop.type && <span style={{ opacity: 0.6 }}>: {prop.type}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
+        {isEntityAggregateRoot && (
+          <div style={{
+            position: 'absolute', top: 4, right: 20,
+            background: '#b8860b', color: '#fff',
+            fontSize: '8px', fontWeight: 700,
+            letterSpacing: '0.06em', textTransform: 'uppercase',
+            padding: '1px 5px', borderRadius: 3, pointerEvents: 'none',
+          }}>AR</div>
+        )}
         <PathDots pathIds={note.paths ?? []} allPaths={allPaths} />
         {resizeHandle}
         {deleteBtn}
         {domainEventActionBar}
       </div>
-
-      {showFormatToolbar && noteScreenRect && (
-        <FormatToolbar
-          noteId={note.id}
-          format={format}
-          noteScreenRect={noteScreenRect}
-          onUpdate={(newFormat) => updateNote(note.id, { textFormat: newFormat })}
-        />
-      )}
     </>
   );
 };

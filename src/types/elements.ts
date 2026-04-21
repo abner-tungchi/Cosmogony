@@ -1,7 +1,8 @@
 export type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
   | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot'
-  | 'Diamond' | 'Dto';
+  | 'Diamond' | 'Dto'
+  | 'Information' | 'Entity';
 
 export interface Policy {
   rule: string;
@@ -42,10 +43,18 @@ export interface StickyNote {
   createdAt: string;
   updatedAt: string;
   // DomainEvent-centric fields
+  behavior?: string;              // DomainEvent's behavior description (e.g. "Delete a product")
   information?: Property[];       // Command's input parameters (lives on Command note)
   eventProperties?: Property[];   // Domain Event's output properties (lives on DomainEvent note)
   commandId?: string;             // DomainEvent links to its triggering Command note
-  entityId?: string;              // DomainEvent links to its Aggregate note
+  entityId?: string;              // DomainEvent links to its Entity note
+  // Visual group fields
+  groupEventId?: string;              // Information/Command/Entity → their parent DomainEvent id
+  informationForCommandId?: string;   // Information note → which Command it serves
+  aggregateRootId?: string;           // Entity note → which AggregateRoot it belongs to (legacy, kept for backward compat)
+  isAggregateRoot?: boolean;          // Entity is designated as Aggregate Root
+  linkedAggregateNoteId?: string;     // id of the auto-created Aggregate note linked to this Entity
+  groupCollapsed?: boolean;           // DomainEvent: whether its group is collapsed (satellites hidden)
 }
 
 // BundleSubNote kept only for Remodel compatibility

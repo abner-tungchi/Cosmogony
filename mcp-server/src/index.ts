@@ -12,7 +12,8 @@ import { fileURLToPath } from 'url';
 
 type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
-  | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot' | 'Diamond' | 'Dto';
+  | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot' | 'Diamond' | 'Dto'
+  | 'Information' | 'Entity' | 'AggregateRoot';
 
 interface FlowPath {
   id: string;
@@ -40,10 +41,15 @@ interface StickyNote {
   createdAt: string;
   updatedAt: string;
   // DomainEvent-centric fields
+  behavior?: string;              // DomainEvent's behavior description (e.g. "Delete a product")
   information?: Property[];       // Command's input parameters
   eventProperties?: Property[];   // DomainEvent's output properties
   commandId?: string;             // DomainEvent links to its triggering Command
-  entityId?: string;              // DomainEvent links to its Aggregate
+  entityId?: string;              // DomainEvent links to its Entity note
+  // Visual group fields
+  groupEventId?: string;              // Information/Command/Entity → their parent DomainEvent id
+  informationForCommandId?: string;   // Information note → which Command it serves
+  aggregateRootId?: string;           // Entity note → which AggregateRoot it belongs to
 }
 
 interface BundleSubNote {
@@ -450,6 +456,9 @@ server.tool(
         noteCount: b.notes.length,
         domainEventCount: b.notes.filter((n) => n.type === 'DomainEvent').length,
         commandCount: b.notes.filter((n) => n.type === 'Command').length,
+        entityCount: b.notes.filter((n) => n.type === 'Entity').length,
+        aggregateRootCount: b.notes.filter((n) => n.type === 'AggregateRoot').length,
+        informationCount: b.notes.filter((n) => n.type === 'Information').length,
         remodelCount: b.remodels.length,
         linkCount: b.links.length,
         flowPathCount: b.flowPaths.length,
@@ -548,16 +557,22 @@ Use this before incremental edits to read current state.`,
   async () => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
-    // Annotate each DomainEvent note with resolved labels for readability
+    // Annotate each note with resolved labels for readability
     const notesWithComputed = board.notes.map((n) => {
-      if (n.type !== 'DomainEvent') return n;
-      const commandNote = n.commandId ? board.notes.find((c) => c.id === n.commandId) : undefined;
-      const entityNote = n.entityId ? board.notes.find((e) => e.id === n.entityId) : undefined;
-      return {
-        ...n,
-        _commandLabel: commandNote?.label ?? null,
-        _entityLabel: entityNote?.label ?? null,
-      };
+      if (n.type === 'DomainEvent') {
+        const commandNote = n.commandId ? board.notes.find((c) => c.id === n.commandId) : undefined;
+        const entityNote = n.entityId ? board.notes.find((e) => e.id === n.entityId) : undefined;
+        return {
+          ...n,
+          _commandLabel: commandNote?.label ?? null,
+          _entityLabel: entityNote?.label ?? null,
+        };
+      }
+      if (n.type === 'Entity' && n.aggregateRootId) {
+        const aggRoot = board.notes.find((e) => e.id === n.aggregateRootId);
+        return { ...n, _aggregateRootLabel: aggRoot?.label ?? null };
+      }
+      return n;
     });
     const boardWithComputed = { ...board, notes: notesWithComputed };
     return {
@@ -612,15 +627,16 @@ Layout guide:
   • Types: DomainEvent | Command | Aggregate | Policy | ExternalSystem | Actor | ReadModel | Hotspot | Diamond | Dto
 Note: Prefer es_add_command_for_event to create Command+DomainEvent pairs atomically.`,
   {
-    type: z.enum(['DomainEvent', 'Command', 'Aggregate', 'Policy', 'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto']).describe('Element type'),
+    type: z.enum(['DomainEvent', 'Command', 'Aggregate', 'AggregateRoot', 'Policy', 'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto']).describe('Element type'),
     label: z.string().describe('Text label for the note'),
     x: z.number().describe('X position in canvas coordinates'),
     y: z.number().describe('Y position in canvas coordinates'),
     paths: z.array(z.string()).optional().describe('FlowPath IDs this note belongs to'),
     phase: z.string().optional().describe('Phase or stage label for this note'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
+    behavior: z.string().optional().describe('(DomainEvent only) Behavior description for this event (e.g. "Delete a product")'),
   },
-  async ({ type, label, x, y, paths, phase, notes }) => {
+  async ({ type, label, x, y, paths, phase, notes, behavior }) => {
     await loadProjectFromRelay();
     const now = new Date().toISOString();
     const note: StickyNote = {
@@ -633,6 +649,7 @@ Note: Prefer es_add_command_for_event to create Command+DomainEvent pairs atomic
       paths: paths ?? [],
       phase,
       notes,
+      ...(type === 'DomainEvent' && behavior !== undefined ? { behavior } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -658,8 +675,9 @@ server.tool(
     paths: z.array(z.string()).optional().describe('FlowPath IDs this note belongs to'),
     phase: z.string().optional().describe('Phase or stage label for this note'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
+    behavior: z.string().optional().describe('(DomainEvent only) Behavior description for this event (e.g. "Delete a product")'),
   },
-  async ({ id, label, x, y, paths, phase, notes }) => {
+  async ({ id, label, x, y, paths, phase, notes, behavior }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const note = board.notes.find(n => n.id === id);
@@ -670,12 +688,13 @@ server.tool(
     if (paths !== undefined) note.paths = paths;
     if (phase !== undefined) note.phase = phase;
     if (notes !== undefined) note.notes = notes;
+    if (behavior !== undefined && note.type === 'DomainEvent') note.behavior = behavior;
     note.updatedAt = new Date().toISOString();
     board.updatedAt = note.updatedAt;
     projectState.updatedAt = note.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_note', { id, label, x, y, paths, phase, notes });
+    await broadcast('update_note', { id, label, x, y, paths, phase, notes, behavior });
     return { content: [{ type: 'text' as const, text: 'Note updated.' }] };
   }
 );
@@ -737,7 +756,7 @@ Use this to build the Command→Event flow step by step:
       type: 'Command',
       label: commandLabel,
       position: {
-        x: eventNote.position.x - 200,
+        x: eventNote.position.x - 176,
         y: eventNote.position.y,
       },
       size: { width: 160, height: 80 },
@@ -745,27 +764,41 @@ Use this to build the Command→Event flow step by step:
       paths: eventNote.paths ?? [],
       phase: eventNote.phase,
       information: information ?? [],
+      groupEventId: eventNoteId,
       createdAt: now,
       updatedAt: now,
     };
 
     board.notes.push(commandNote);
 
-    // Update the DomainEvent to reference this Command
+    // If information is non-empty, also create an Information note
+    let infoNoteId: string | undefined;
+    if ((information ?? []).length > 0) {
+      infoNoteId = uuidv4();
+      const infoNote: StickyNote = {
+        id: infoNoteId,
+        type: 'Information',
+        label: commandLabel + ' Info',
+        position: {
+          x: commandNote.position.x - 176,
+          y: commandNote.position.y,
+        },
+        size: { width: 160, height: 80 },
+        zIndex: eventNote.zIndex,
+        paths: eventNote.paths ?? [],
+        information: [...(information ?? [])],
+        groupEventId: eventNoteId,
+        informationForCommandId: commandNoteId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      board.notes.push(infoNote);
+      await broadcast('add_note', infoNote);
+    }
+
+    // Update the DomainEvent to reference this Command (no Link record)
     eventNote.commandId = commandNoteId;
     eventNote.updatedAt = now;
-
-    // Create directional link Command → DomainEvent
-    const linkId = uuidv4();
-    const link: Link = {
-      id: linkId,
-      fromId: commandNoteId,
-      toId: eventNoteId,
-      fromType: 'note',
-      toType: 'note',
-      createdAt: now,
-    };
-    board.links.push(link);
 
     board.updatedAt = now;
     projectState.updatedAt = now;
@@ -773,12 +806,11 @@ Use this to build the Command→Event flow step by step:
     await syncProjectToRelay();
     await broadcast('add_note', commandNote);
     await broadcast('update_note', { id: eventNoteId, commandId: commandNoteId });
-    await broadcast('add_link', link);
 
     return {
       content: [{
         type: 'text' as const,
-        text: JSON.stringify({ commandId: commandNoteId, linkId }),
+        text: JSON.stringify({ commandId: commandNoteId, infoNoteId: infoNoteId ?? null }),
       }],
     };
   }
@@ -885,6 +917,7 @@ Example: 3 steps → placed at x=80, x=480, x=880 (if board is empty)`,
     steps: z.array(z.object({
       commandLabel: z.string().describe('Command label (imperative: e.g. "PlaceOrder")'),
       eventLabel: z.string().describe('Domain Event label (past tense: e.g. "OrderPlaced")'),
+      eventBehavior: z.string().optional().describe('Behavior description for the DomainEvent (e.g. "Delete a product")'),
       information: z.array(z.object({
         attrName: z.string(),
         type: z.string(),
@@ -938,6 +971,7 @@ Example: 3 steps → placed at x=80, x=480, x=880 (if board is empty)`,
         zIndex: 1,
         paths: [],
         commandId,
+        ...(s.eventBehavior !== undefined ? { behavior: s.eventBehavior } : {}),
         eventProperties: s.eventProperties ?? [],
         createdAt: now,
         updatedAt: now,
@@ -1332,6 +1366,100 @@ server.tool(
     await syncProjectToRelay();
     await broadcast('delete_link', { id });
     return { content: [{ type: 'text' as const, text: 'Link deleted.' }] };
+  }
+);
+
+// ─── Entity / AggregateRoot tools ───────────────────────────────────────────
+
+server.tool(
+  'es_add_entity_for_event',
+  `Create an Entity note and link it to an existing DomainEvent note as its entity.
+The Entity is placed above the group of satellite notes (Command, Information) centered on the DomainEvent.
+Returns { entityId }.`,
+  {
+    eventNoteId: z.string().describe('ID of the DomainEvent note'),
+    entityLabel: z.string().describe('Label for the Entity note (noun, e.g. "Order", "Customer")'),
+  },
+  async ({ eventNoteId, entityLabel }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const eventNote = board.notes.find((n) => n.id === eventNoteId);
+    if (!eventNote) {
+      return { content: [{ type: 'text' as const, text: `DomainEvent note ${eventNoteId} not found.` }] };
+    }
+    if (eventNote.type !== 'DomainEvent') {
+      return { content: [{ type: 'text' as const, text: `Note ${eventNoteId} is not a DomainEvent.` }] };
+    }
+
+    const now = new Date().toISOString();
+    const NOTE_WIDTH = 160;
+
+    // Compute group bounds
+    const groupNotes = board.notes.filter(
+      (n) => n.groupEventId === eventNoteId || n.id === eventNoteId
+    );
+    const minX = groupNotes.length > 0 ? Math.min(...groupNotes.map((n) => n.position.x)) : eventNote.position.x;
+    const maxX = groupNotes.length > 0 ? Math.max(...groupNotes.map((n) => n.position.x)) : eventNote.position.x;
+    const groupCenterX = (minX + maxX + NOTE_WIDTH) / 2;
+
+    const entityNote: StickyNote = {
+      id: uuidv4(),
+      type: 'Entity',
+      label: entityLabel,
+      position: {
+        x: groupCenterX - NOTE_WIDTH / 2,
+        y: eventNote.position.y - 104,
+      },
+      size: { width: NOTE_WIDTH, height: 80 },
+      zIndex: eventNote.zIndex,
+      paths: eventNote.paths ?? [],
+      groupEventId: eventNoteId,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    board.notes.push(entityNote);
+    eventNote.entityId = entityNote.id;
+    eventNote.updatedAt = now;
+
+    board.updatedAt = now;
+    projectState.updatedAt = now;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('add_note', entityNote);
+    await broadcast('update_note', { id: eventNoteId, entityId: entityNote.id });
+
+    return {
+      content: [{ type: 'text' as const, text: JSON.stringify({ entityId: entityNote.id }) }],
+    };
+  }
+);
+
+server.tool(
+  'es_link_entity_to_aggregate_root',
+  `Link an Entity note to an AggregateRoot note. Sets Entity.aggregateRootId = aggregateRootNoteId.
+Pass aggregateRootNoteId as empty string "" to unlink.
+Returns { success: true }.`,
+  {
+    entityNoteId: z.string().describe('ID of the Entity note'),
+    aggregateRootNoteId: z.string().describe('ID of the AggregateRoot note to link (pass empty string to unlink)'),
+  },
+  async ({ entityNoteId, aggregateRootNoteId }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const entityNote = board.notes.find((n) => n.id === entityNoteId);
+    if (!entityNote) return { content: [{ type: 'text' as const, text: `Entity note ${entityNoteId} not found.` }] };
+    if (entityNote.type !== 'Entity') return { content: [{ type: 'text' as const, text: `Note ${entityNoteId} is not an Entity.` }] };
+
+    const aggRootId = aggregateRootNoteId.trim() === '' ? undefined : aggregateRootNoteId;
+    entityNote.aggregateRootId = aggRootId;
+    entityNote.updatedAt = new Date().toISOString();
+    board.updatedAt = entityNote.updatedAt;
+    projectState.updatedAt = entityNote.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: entityNoteId, aggregateRootId: aggRootId });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
   }
 );
 

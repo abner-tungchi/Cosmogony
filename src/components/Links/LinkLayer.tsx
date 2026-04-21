@@ -22,8 +22,16 @@ export const LinkLayer: React.FC = () => {
         setDrag({ noteIds: [], remodelIds: [id.replace('remodel-', '')], dx, dy });
       } else {
         // if dragged note is selected, all selected notes move together
-        const ids = selectedNoteIds.includes(id) ? selectedNoteIds : [id];
-        setDrag({ noteIds: ids, remodelIds: [], dx, dy });
+        const baseIds = selectedNoteIds.includes(id) ? selectedNoteIds : [id];
+        // Also include all satellites of the dragged note's group (covers collapsed chips
+        // and links that may reference satellite note ids directly)
+        const groupIds = new Set<string>(baseIds);
+        for (const anchorId of baseIds) {
+          for (const note of activeBoard.notes) {
+            if (note.groupEventId === anchorId) groupIds.add(note.id);
+          }
+        }
+        setDrag({ noteIds: Array.from(groupIds), remodelIds: [], dx, dy });
       }
     },
     onDragEnd()    { setDrag(null); },

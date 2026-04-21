@@ -1,8 +1,9 @@
 import React from 'react';
-import { ELEMENT_CONFIGS, ELEMENT_TYPE_LIST } from '../../constants/elementTypes';
+import { v4 as uuidv4 } from 'uuid';
+import { ELEMENT_CONFIGS, PALETTE_TYPE_LIST } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
-import type { ElementType } from '../../types/elements';
+import type { ElementType, StickyNote as StickyNoteType, Remodel } from '../../types/elements';
 
 interface Props {
   collapsed: boolean;
@@ -14,6 +15,7 @@ const iconMap: Record<string, string> = {
   DomainEvent: '⚡',
   Command: '📋',
   Aggregate: '📦',
+  AggregateRoot: '◈',
   Policy: '📜',
   ExternalSystem: '🔌',
   Actor: '👤',
@@ -25,22 +27,82 @@ const iconMap: Record<string, string> = {
 
 export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, currentView }) => {
   const {
-    activeToolType, setActiveToolType,
-    zoom, setZoom, resetView, fitAll,
+    zoom, panX, panY, setZoom, resetView, fitAll,
     isLinkingMode, setLinkingMode,
     setCurrentView,
+    setSelectedNoteIds, setSelectedElement,
   } = useUIStore();
-  const { addBoard, renameBoard, openBoard, project } = useBoardStore();
+  const { addBoard, renameBoard, openBoard, project, addNote, addRemodel } = useBoardStore();
   const activeBoard = useBoardStore(selectActiveBoard);
+
+  // Compute canvas center position based on current viewport, pan, and zoom
+  const getViewportCenter = () => {
+    const viewport = document.getElementById('board-canvas-viewport');
+    const rect = viewport?.getBoundingClientRect();
+    const vpWidth = rect?.width ?? window.innerWidth;
+    const vpHeight = rect?.height ?? window.innerHeight;
+    return {
+      x: (vpWidth / 2 - panX) / zoom,
+      y: (vpHeight / 2 - panY) / zoom,
+    };
+  };
 
   const handleToolClick = (type: string) => {
     if (type === 'Link') {
       setLinkingMode(!isLinkingMode);
-      setActiveToolType(null);
-    } else {
-      setLinkingMode(false);
-      setActiveToolType(activeToolType === type ? null : type);
+      return;
     }
+
+    setLinkingMode(false);
+
+    // Special: Remodel — create directly at canvas center
+    if (type === 'Remodel') {
+      const center = getViewportCenter();
+      const newRemodel: Remodel = {
+        id: uuidv4(),
+        position: {
+          x: center.x - (160 * 3 + 8 * 2) / 2,
+          y: center.y - (120 * 2 + 8) / 2,
+        },
+        aggregateNote: { label: '', content: '' },
+        parameterNote: { label: '', content: '' },
+        queryNote: { label: '', content: '' },
+        returnTypeNote: { label: '', content: '' },
+        linkedBundleIds: [],
+        linkedDtoIds: [],
+        zIndex: 10 + activeBoard.remodels.length,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      addRemodel(newRemodel);
+      return;
+    }
+
+    // All StickyNote types — create directly at canvas center
+    const config = ELEMENT_CONFIGS[type as keyof typeof ELEMENT_CONFIGS];
+    if (!config) return;
+
+    const center = getViewportCenter();
+    const DEFAULT_DTO_LABEL = '[DtoName]\n----------\nfield: Type';
+    const noteLabel = type === 'Dto' ? DEFAULT_DTO_LABEL : config.label;
+
+    const newNote: StickyNoteType = {
+      id: uuidv4(),
+      type: type as StickyNoteType['type'],
+      label: noteLabel,
+      position: {
+        x: center.x - config.defaultSize.width / 2,
+        y: center.y - config.defaultSize.height / 2,
+      },
+      size: config.defaultSize,
+      zIndex: 10 + activeBoard.notes.length,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    addNote(newNote);
+    setSelectedNoteIds([newNote.id]);
+    setSelectedElement(newNote.id, 'note');
   };
 
   const handleFitAll = () => {
@@ -69,7 +131,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     );
 
   const toolBtn = (type: string, label: string, color?: string) => {
-    const isActive = type === 'Link' ? isLinkingMode : activeToolType === type;
+    const isActive = type === 'Link' ? isLinkingMode : false;
     return (
       <button
         key={type}
@@ -252,7 +314,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
           {totalNotes > 0 ? (
             <>
               <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 6 }}>
-                {sortedTypes.map(([type, count]) => (
+                {sortedTypes.filter(([type]) => !!ELEMENT_CONFIGS[type]).map(([type, count]) => (
                   <div
                     key={type}
                     title={`${ELEMENT_CONFIGS[type].label}: ${count}`}
@@ -266,7 +328,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
               </div>
               {/* legend — top 4 */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 8px' }}>
-                {sortedTypes.slice(0, 4).map(([type, count]) => (
+                {sortedTypes.filter(([type]) => !!ELEMENT_CONFIGS[type]).slice(0, 4).map(([type, count]) => (
                   <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: '#94a3b8' }}>
                     <span style={{ width: 8, height: 8, borderRadius: 2, background: ELEMENT_CONFIGS[type].color, display: 'inline-block', flexShrink: 0 }} />
                     {count}
@@ -324,8 +386,8 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
           padding: collapsed ? '10px 0' : '8px 12px',
           margin: '2px 8px',
           borderRadius: 8,
-          border: activeToolType === 'Remodel' ? '2px solid #3b82f6' : '2px solid #334155',
-          background: activeToolType === 'Remodel' ? 'rgba(59,130,246,0.15)' : '#1e293b',
+          border: '2px solid #334155',
+          background: '#1e293b',
           cursor: 'pointer',
           color: '#e2e8f0',
           fontSize: 13,
@@ -337,8 +399,8 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
         {!collapsed && <span style={{ fontWeight: 600 }}>Read Model</span>}
       </button>
 
-      {/* All element types — exclude ReadModel (replaced by Remodel 4-in-1) */}
-      {ELEMENT_TYPE_LIST.filter((t) => t !== 'ReadModel').map((type: ElementType) => {
+      {/* All palette element types — excludes ReadModel (replaced by Remodel), Aggregate (legacy), Entity (created via DomainEvent), Information (created via Command) */}
+      {PALETTE_TYPE_LIST.filter((t) => t !== 'ReadModel').map((type: ElementType) => {
         const config = ELEMENT_CONFIGS[type];
         return toolBtn(type, config.label, config.color);
       })}

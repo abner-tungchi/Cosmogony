@@ -37,11 +37,13 @@ interface SubNoteProps {
   offsetY: number;
   onSave: (label: string, content: string) => void;
   zoom: number;
+  title: string;
   labelPlaceholder?: string;
 }
 
 const SubNote: React.FC<SubNoteProps> = ({
-  label, content, bgColor, textColor, offsetX, offsetY, onSave, labelPlaceholder,
+  label, content, bgColor, textColor, offsetX, offsetY, onSave,
+  title, labelPlaceholder,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editLabel, setEditLabel] = useState(label);
@@ -90,6 +92,22 @@ const SubNote: React.FC<SubNoteProps> = ({
       onDoubleClick={handleDoubleClick}
       onBlur={handleContainerBlur}
     >
+      {/* Section title — read-only */}
+      <div style={{ marginBottom: 6 }}>
+        <div
+          style={{
+            fontSize: '9px',
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            opacity: 0.55,
+            userSelect: 'none',
+          }}
+        >
+          {title}
+        </div>
+      </div>
+
       {isEditing ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, gap: 4 }}>
           <input
@@ -410,7 +428,6 @@ export const Remodel: React.FC<Props> = ({
 
   // Collapsed resize — refs must be at top level (Rules of Hooks)
   const collapsedResizeRightRef = useRef<{ startX: number; startW: number; startH: number } | null>(null);
-  const collapsedResizeBottomRef = useRef<{ startY: number; startW: number; startH: number } | null>(null);
 
   const collapsedW = remodel.collapsedSize?.width ?? COLLAPSED_REMODEL_W;
   const collapsedH = remodel.collapsedSize?.height ?? COLLAPSED_REMODEL_H;
@@ -433,24 +450,6 @@ export const Remodel: React.FC<Props> = ({
     document.addEventListener('mouseup', onUp);
   };
 
-  const handleCollapsedBottomMouseDown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    collapsedResizeBottomRef.current = { startY: e.clientY, startW: collapsedW, startH: collapsedH };
-    const onMove = (ev: MouseEvent) => {
-      if (!collapsedResizeBottomRef.current) return;
-      const newH = Math.max(40, collapsedResizeBottomRef.current.startH + (ev.clientY - collapsedResizeBottomRef.current.startY) / zoom);
-      updateRemodel(remodel.id, { collapsedSize: { width: collapsedResizeBottomRef.current.startW, height: newH } });
-    };
-    const onUp = () => {
-      collapsedResizeBottomRef.current = null;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
-
   const saveSub = (key: keyof Pick<RemodelType, 'parameterNote' | 'queryNote' | 'returnTypeNote'>) =>
     (label: string, content: string) => {
       updateRemodel(remodel.id, { [key]: { label, content } as BundleSubNote });
@@ -463,63 +462,77 @@ export const Remodel: React.FC<Props> = ({
         ref={setNodeRef}
         style={{
           ...baseStyle,
-          width: collapsedW,
-          height: collapsedH,
-          backgroundColor: COLORS.collapsed,
+          width: COLLAPSED_REMODEL_W,
+          height: COLLAPSED_REMODEL_H,
+          backgroundColor: '#7c3aed',
           color: 'white',
-          borderRadius: 6,
-          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+          borderRadius: 8,
+          boxShadow: '0 2px 8px rgba(124,58,237,0.35)',
           display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'center',
-          padding: `6px 36px 6px 12px`,
+          flexDirection: 'row',
+          alignItems: 'center',
+          padding: '0 8px 0 12px',
+          gap: 8,
           overflow: 'hidden',
         }}
         onClick={handleClick}
         onMouseDown={(e) => e.stopPropagation()}
         {...dragProps}
       >
-        {/* Aggregate — subtitle row */}
-        {remodel.aggregateNote.label && (
-          <div style={{
-            fontSize: '10px',
-            opacity: 0.75,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            marginBottom: 2,
-          }}>
-            {remodel.aggregateNote.label}
-          </div>
-        )}
-
-        {/* Query — main title row */}
-        <div style={{
-          fontSize: '12px',
+        {/* RM badge */}
+        <span style={{
+          background: 'rgba(255,255,255,0.20)',
+          borderRadius: 10,
+          padding: '2px 6px',
+          fontSize: '10px',
           fontWeight: 700,
+          letterSpacing: '0.06em',
+          flexShrink: 0,
+        }}>
+          RM
+        </span>
+
+        {/* Query name */}
+        <span style={{
+          fontSize: '13px',
+          fontWeight: 700,
+          flex: 1,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
         }}>
-          {remodel.queryNote.content || 'GetXXXReadModel'}
-        </div>
+          {remodel.queryNote.content || remodel.queryNote.label || 'Read Model'}
+        </span>
+
+        {/* Return type label */}
+        {remodel.returnTypeNote.label && (
+          <span style={{
+            fontSize: '11px',
+            opacity: 0.60,
+            flexShrink: 0,
+            maxWidth: 80,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            marginRight: 4,
+          }}>
+            {remodel.returnTypeNote.label}
+          </span>
+        )}
 
         {/* Expand button */}
         <button
           onClick={(e) => { e.stopPropagation(); updateRemodel(remodel.id, { collapsed: false }); }}
           style={{
-            position: 'absolute',
-            right: 6,
-            top: '50%',
-            transform: 'translateY(-50%)',
-            background: 'rgba(255,255,255,0.25)',
+            background: 'rgba(255,255,255,0.20)',
             border: 'none',
             borderRadius: 4,
             color: 'white',
             cursor: 'pointer',
-            padding: '3px 6px',
+            padding: '4px 8px',
             fontSize: '11px',
             lineHeight: 1,
+            flexShrink: 0,
           }}
           title="展開 Read Model"
         >
@@ -547,19 +560,6 @@ export const Remodel: React.FC<Props> = ({
           }}
         />
 
-        {/* Bottom-edge resize handle */}
-        <div
-          onMouseDown={handleCollapsedBottomMouseDown}
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 6,
-            cursor: 'ns-resize',
-          }}
-        />
-
         <PathDots pathIds={remodel.paths ?? []} allPaths={allPaths} />
       </div>
     );
@@ -584,6 +584,7 @@ export const Remodel: React.FC<Props> = ({
         offsetY={ENTITY_Y}
         onSave={saveSub('parameterNote')}
         zoom={zoom}
+        title="Parameters"
         labelPlaceholder="Parameters"
       />
 
@@ -597,6 +598,7 @@ export const Remodel: React.FC<Props> = ({
         offsetY={COMMAND_Y}
         onSave={saveSub('queryNote')}
         zoom={zoom}
+        title="func name"
         labelPlaceholder="Read Model Name"
       />
 
@@ -610,6 +612,7 @@ export const Remodel: React.FC<Props> = ({
         offsetY={EVENT_Y}
         onSave={saveSub('returnTypeNote')}
         zoom={zoom}
+        title="return"
         labelPlaceholder="Return"
       />
 

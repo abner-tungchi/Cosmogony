@@ -40,7 +40,7 @@ function getLabelForId(id: string, board: Board): string {
   const note = board.notes.find((n) => n.id === id);
   if (note) return `${note.type}: ${note.label}`;
   const remodel = board.remodels?.find((r) => r.id === id);
-  if (remodel) return `Remodel: ${remodel.queryNote.label || remodel.aggregateNote.label}`;
+  if (remodel) return `ReadModel: ${remodel.queryNote.label || remodel.aggregateNote.label}`;
   return id;
 }
 
@@ -58,6 +58,9 @@ export function exportToMarkdown(board: Board): string {
     lines.push('');
     for (const event of domainEvents) {
       lines.push(`### ${event.label || '(unnamed event)'}`);
+      if (event.behavior) {
+        lines.push(`- **Behavior**: ${event.behavior}`);
+      }
       if (event.commandId) {
         const cmdNote = board.notes.find((n) => n.id === event.commandId);
         if (cmdNote) {
@@ -82,21 +85,48 @@ export function exportToMarkdown(board: Board): string {
           lines.push(`  - ${prop.attrName}: ${prop.type}`);
         }
       }
+      // Links for this DomainEvent
+      const eventLinks = board.links.filter(
+        (l) => l.fromId === event.id || l.toId === event.id
+      );
+      if (eventLinks.length > 0) {
+        lines.push(`- **Links**:`);
+        for (const link of eventLinks) {
+          const otherId = link.fromId === event.id ? link.toId : link.fromId;
+          const otherNote = board.notes.find((n) => n.id === otherId);
+          if (otherNote) {
+            lines.push(`  - [${otherNote.type}] ${otherNote.label}`);
+          } else {
+            const otherRemodel = board.remodels?.find((r) => r.id === otherId);
+            if (otherRemodel) {
+              lines.push(`  - [ReadModel] ${otherRemodel.queryNote.label || otherRemodel.aggregateNote.label}`);
+            }
+          }
+        }
+      }
       lines.push('');
     }
   }
 
-  // Remodels section
+  // ReadModels section
   if (board.remodels && board.remodels.length > 0) {
-    lines.push('## Remodels');
+    lines.push('## ReadModels');
     lines.push('');
     for (const remodel of board.remodels) {
-      const queryLabel = remodel.queryNote.label || '(unnamed)';
-      lines.push(`### ${queryLabel}`);
-      lines.push(`- **Aggregate**: ${remodel.aggregateNote.label || '—'}${remodel.aggregateNote.content ? ' — ' + remodel.aggregateNote.content : ''}`);
+      const funcLabel = remodel.queryNote.label || '(unnamed)';
+      lines.push(`### ${funcLabel}`);
       lines.push(`- **Parameters**: ${remodel.parameterNote.label || '—'}${remodel.parameterNote.content ? ' — ' + remodel.parameterNote.content : ''}`);
-      lines.push(`- **Query**: ${remodel.queryNote.label || '—'}${remodel.queryNote.content ? ' — ' + remodel.queryNote.content : ''}`);
-      lines.push(`- **Return Type**: ${remodel.returnTypeNote.label || '—'}${remodel.returnTypeNote.content ? ' — ' + remodel.returnTypeNote.content : ''}`);
+      lines.push(`- **FuncName**: ${remodel.queryNote.label || '—'}${remodel.queryNote.content ? ' — ' + remodel.queryNote.content : ''}`);
+      lines.push(`- **Return**: ${remodel.returnTypeNote.label || '—'}${remodel.returnTypeNote.content ? ' — ' + remodel.returnTypeNote.content : ''}`);
+
+      // Linked DTOs
+      const linkedDtos = (remodel.linkedDtoIds ?? [])
+        .map((id) => board.notes.find((n) => n.id === id && n.type === 'Dto'))
+        .filter((n): n is StickyNote => n !== undefined);
+      if (linkedDtos.length > 0) {
+        lines.push(`- **Linked DTOs**: ${linkedDtos.map((n) => n.label).join(', ')}`);
+      }
+
       lines.push('');
     }
   }
@@ -193,6 +223,23 @@ export function exportToMarkdown(board: Board): string {
       lines.push(`- ◆ ${d.label}`);
     }
     lines.push('');
+  }
+
+  // FlowPaths section
+  if (board.flowPaths && board.flowPaths.length > 0) {
+    lines.push('## FlowPaths');
+    lines.push('');
+    const domainEventsAll = board.notes.filter((n) => n.type === 'DomainEvent');
+    for (const fp of board.flowPaths) {
+      lines.push(`### ${fp.name}`);
+      const eventsInPath = domainEventsAll.filter(
+        (e) => e.paths && e.paths.includes(fp.id)
+      );
+      for (const e of eventsInPath) {
+        lines.push(`- ${e.label || '(unnamed event)'}`);
+      }
+      lines.push('');
+    }
   }
 
   return lines.join('\n');

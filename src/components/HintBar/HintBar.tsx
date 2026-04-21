@@ -7,8 +7,8 @@ interface ShortcutHint {
 
 const SHORTCUTS: ShortcutHint[] = [
   { key: 'F', label: 'Fit All' },
-  { key: 'Esc', label: '關閉面板' },
-  { key: 'Del', label: '刪除' },
+  { key: 'Esc', label: 'Close Panel' },
+  { key: 'Del', label: 'Delete' },
 ];
 
 export const HintBar: React.FC = () => {

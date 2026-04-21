@@ -79,9 +79,30 @@ export const ELEMENT_CONFIGS: Record<ElementType, ElementConfig> = {
     textColor: '#14532d',
     defaultSize: { width: 200, height: 160 },
   },
+  Information: {
+    type: 'Information',
+    label: 'Information',
+    color: '#4CAF50',
+    textColor: '#ffffff',
+    defaultSize: { width: 160, height: 80 },
+  },
+  Entity: {
+    type: 'Entity',
+    label: 'Entity',
+    color: '#FFD600',
+    textColor: '#333333',
+    defaultSize: { width: 160, height: 80 },
+  },
 };
 
 export const ELEMENT_TYPE_LIST: ElementType[] = [
+  'DomainEvent', 'Command', 'Aggregate', 'Policy',
+  'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto',
+  'Information', 'Entity',
+];
+
+// Types shown in the sidebar palette (Entity created only via "Set Entity" on DomainEvent)
+export const PALETTE_TYPE_LIST: ElementType[] = [
   'DomainEvent', 'Command', 'Aggregate', 'Policy',
   'ExternalSystem', 'Actor', 'ReadModel', 'Hotspot', 'Diamond', 'Dto',
 ];

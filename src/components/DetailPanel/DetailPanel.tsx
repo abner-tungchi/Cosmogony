@@ -254,33 +254,71 @@ const EditableColorBlock: React.FC<EditableColorBlockProps> = ({
   );
 };
 
-// ─── DomainEvent Panel ────────────────────────────────────────────────────────
+// ─── Group Panel ──────────────────────────────────────────────────────────────
 
-interface DomainEventPanelProps {
+interface GroupPanelProps {
   note: StickyNote;
   allNotes: StickyNote[];
   flowPaths: FlowPath[];
+  onAddCommand?: (noteId: string) => void;
+  onSetEntity?: (noteId: string) => void;
 }
 
-const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flowPaths }) => {
-  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent } = useBoardStore();
-  const [activeTab, setActiveTab] = useState<'information' | 'event'>('information');
-  const [notesMeta, setNotesMeta] = useState(note.notes ?? '');
-  const [localInfo, setLocalInfo] = useState<Property[]>(note.information ?? []);
-  const [localEventProps, setLocalEventProps] = useState<Property[]>(note.eventProperties ?? []);
+const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAddCommand, onSetEntity }) => {
+  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent, linkEventToAggregate, setEntityAsAggregateRoot, unsetEntityAsAggregateRoot } = useBoardStore();
 
-  // Linked Command
   const linkedCommand = note.commandId ? allNotes.find((n) => n.id === note.commandId) : undefined;
-  // Linked Entity (Aggregate)
-  const linkedEntity = note.entityId ? allNotes.find((n) => n.id === note.entityId) : undefined;
+  const linkedEntityOrAggregate = note.entityId ? allNotes.find((n) => n.id === note.entityId) : undefined;
 
-  // Sync when switching notes
+  // Determine which state we're in for the Entity/Aggregate section
+  const linkedEntity = linkedEntityOrAggregate?.type === 'Entity' ? linkedEntityOrAggregate : undefined;
+  const linkedAggregate = linkedEntityOrAggregate?.type === 'Aggregate' ? linkedEntityOrAggregate : undefined;
+
+  // Count how many DomainEvents reference the same Aggregate
+  const aggregateReferenceCount = linkedAggregate
+    ? allNotes.filter((n) => n.type === 'DomainEvent' && n.entityId === linkedAggregate.id).length
+    : 0;
+
+  // Is this the original group for the Aggregate?
+  const isOriginalAggregateGroup = linkedAggregate?.groupEventId === note.id;
+
+  // List all Aggregate notes on the board for the "Select Aggregate" dropdown
+  const availableAggregates = allNotes.filter((n) => n.type === 'Aggregate');
+  const [showAggregateDropdown, setShowAggregateDropdown] = useState(false);
+  const aggregateDropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    setNotesMeta(note.notes ?? '');
-    setLocalInfo(note.information ?? []);
+    if (!showAggregateDropdown) return;
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (aggregateDropdownRef.current && !aggregateDropdownRef.current.contains(e.target as Node)) {
+        setShowAggregateDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [showAggregateDropdown]);
+
+  const [localInfo, setLocalInfo] = useState<Property[]>(linkedCommand?.information ?? []);
+  const [localEventProps, setLocalEventProps] = useState<Property[]>(note.eventProperties ?? []);
+  const [notesMeta, setNotesMeta] = useState(note.notes ?? '');
+  const [localBehavior, setLocalBehavior] = useState(note.behavior ?? '');
+
+  useEffect(() => {
+    const cmd = note.commandId ? allNotes.find((n) => n.id === note.commandId) : undefined;
+    setLocalInfo(cmd?.information ?? []);
     setLocalEventProps(note.eventProperties ?? []);
-    setActiveTab('information');
+    setNotesMeta(note.notes ?? '');
+    setLocalBehavior(note.behavior ?? '');
   }, [note.id]);
+
+  useEffect(() => {
+    if (note.commandId) {
+      const cmd = allNotes.find((n) => n.id === note.commandId);
+      if (cmd?.information) setLocalInfo(cmd.information);
+    } else {
+      setLocalInfo([]);
+    }
+  }, [note.commandId]);
 
   const togglePath = (pathId: string) => {
     const current = note.paths ?? [];
@@ -290,22 +328,431 @@ const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flo
     updateNote(note.id, { paths: updated });
   };
 
-  const saveNotesMeta = useCallback(() => {
-    updateNote(note.id, { notes: notesMeta });
-  }, [note.id, notesMeta, updateNote]);
+  const notePaths = note.paths ?? [];
 
-  const saveInformation = useCallback(() => {
-    if (linkedCommand) {
-      updateCommandInformation(linkedCommand.id, localInfo);
-    }
-  }, [linkedCommand, localInfo, updateCommandInformation]);
+  const dashedBtn: React.CSSProperties = {
+    background: 'none',
+    border: '1px dashed rgba(255,255,255,0.2)',
+    borderRadius: 4,
+    color: TEXT_DIM,
+    cursor: 'pointer',
+    fontSize: 12,
+    padding: '6px 10px',
+    width: '100%',
+    textAlign: 'left',
+    fontFamily: 'inherit',
+  };
 
-  const saveEventProperties = useCallback(() => {
-    updateEventProperties(note.id, localEventProps);
-  }, [note.id, localEventProps, updateEventProperties]);
+  const nameInput = (accent: string): React.CSSProperties => ({
+    width: '100%',
+    background: `rgba(${accent},0.1)`,
+    border: `1px solid rgba(${accent},0.3)`,
+    borderRadius: 4,
+    color: TEXT_MAIN,
+    fontSize: 13,
+    fontWeight: 600,
+    padding: '6px 10px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  });
 
-  const handleUnlinkEntity = () => {
-    linkEntityToEvent(note.id, undefined);
+  const divider = <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, margin: '0 0 16px' }} />;
+
+  return (
+    <div style={{ padding: '0 16px 24px' }}>
+      {/* DOMAIN EVENT */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Domain Event</SectionLabel>
+        <input
+          type="text"
+          value={note.label}
+          placeholder="(Unnamed Event)"
+          onChange={(e) => updateNote(note.id, { label: e.target.value })}
+          style={nameInput('255,140,0')}
+        />
+      </div>
+
+      {/* BEHAVIOR */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Behavior</SectionLabel>
+        <input
+          type="text"
+          value={localBehavior}
+          placeholder="e.g. Delete a product"
+          onChange={(e) => setLocalBehavior(e.target.value)}
+          onBlur={() => updateNote(note.id, { behavior: localBehavior })}
+          style={{
+            width: '100%',
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 4,
+            color: TEXT_MAIN,
+            fontSize: 12,
+            padding: '6px 8px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            boxSizing: 'border-box',
+          }}
+        />
+      </div>
+
+      {divider}
+
+      {/* ENTITY / AGGREGATE */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Entity / Aggregate</SectionLabel>
+
+        {/* State C: DomainEvent references an Aggregate note */}
+        {linkedAggregate ? (
+          <div>
+            <div style={{
+              display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6,
+            }}>
+              <div style={{
+                flex: 1,
+                background: 'rgba(184,134,11,0.12)',
+                border: '1px solid rgba(184,134,11,0.35)',
+                borderRadius: 4,
+                padding: '5px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: '#b8860b', flexShrink: 0 }}>AR</span>
+                <input
+                  type="text"
+                  value={linkedAggregate.label}
+                  placeholder="(Unnamed Aggregate)"
+                  onChange={(e) => updateNote(linkedAggregate.id, { label: e.target.value })}
+                  style={{
+                    flex: 1,
+                    background: 'none',
+                    border: 'none',
+                    color: TEXT_MAIN,
+                    fontSize: 12,
+                    outline: 'none',
+                    fontFamily: 'inherit',
+                    padding: 0,
+                  }}
+                />
+              </div>
+              <button
+                onClick={() => linkEntityToEvent(note.id, undefined)}
+                title="Unlink from this Aggregate"
+                style={{ background: 'none', border: 'none', color: TEXT_MUTED, cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1, flexShrink: 0, fontFamily: 'inherit' }}
+              >×</button>
+            </div>
+            {aggregateReferenceCount > 1 && (
+              <div style={{ fontSize: 11, color: TEXT_MUTED, marginBottom: 6 }}>
+                Referenced by {aggregateReferenceCount} groups
+              </div>
+            )}
+            {isOriginalAggregateGroup && (
+              <button
+                onClick={() => unsetEntityAsAggregateRoot(linkedAggregate.id)}
+                style={{
+                  background: 'none', border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: 4, color: TEXT_MUTED, cursor: 'pointer',
+                  fontSize: 11, padding: '3px 10px', fontFamily: 'inherit', display: 'block',
+                }}
+              >
+                Unmark Aggregate Root
+              </button>
+            )}
+          </div>
+        ) : linkedEntity ? (
+          /* State B: DomainEvent has a plain Entity (not yet AR) */
+          <div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 6 }}>
+              <input
+                type="text"
+                value={linkedEntity.label}
+                placeholder="(Unnamed Entity)"
+                onChange={(e) => updateNote(linkedEntity.id, { label: e.target.value })}
+                style={{
+                  flex: 1,
+                  background: 'rgba(255,214,0,0.1)',
+                  border: '1px solid rgba(255,214,0,0.3)',
+                  borderRadius: 4,
+                  color: TEXT_MAIN,
+                  fontSize: 12,
+                  padding: '5px 8px',
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <button
+                onClick={() => linkEntityToEvent(note.id, undefined)}
+                title="Unlink entity"
+                style={{ background: 'none', border: 'none', color: TEXT_MUTED, cursor: 'pointer', fontSize: 14, padding: '0 2px', lineHeight: 1, flexShrink: 0, fontFamily: 'inherit' }}
+              >×</button>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                onClick={() => setEntityAsAggregateRoot(linkedEntity.id)}
+                style={{
+                  background: 'none', border: '1px dashed rgba(184,134,11,0.5)',
+                  borderRadius: 4, color: 'rgba(184,134,11,0.8)', cursor: 'pointer',
+                  fontSize: 11, padding: '3px 10px', fontFamily: 'inherit', flex: 1,
+                }}
+              >
+                Mark as Aggregate Root
+              </button>
+              <div style={{ position: 'relative', flex: 1 }} ref={aggregateDropdownRef}>
+                <button
+                  onClick={() => availableAggregates.length > 0 && setShowAggregateDropdown((v) => !v)}
+                  disabled={availableAggregates.length === 0}
+                  title={availableAggregates.length === 0 ? '尚無 Aggregate，請先在其他 Group 標記 AR' : undefined}
+                  style={{
+                    background: 'none',
+                    border: '1px dashed rgba(184,134,11,0.4)',
+                    borderRadius: 4,
+                    color: availableAggregates.length === 0 ? TEXT_MUTED : 'rgba(184,134,11,0.8)',
+                    cursor: availableAggregates.length === 0 ? 'not-allowed' : 'pointer',
+                    fontSize: 11,
+                    padding: '3px 10px',
+                    fontFamily: 'inherit',
+                    width: '100%',
+                    opacity: availableAggregates.length === 0 ? 0.5 : 1,
+                  }}
+                >
+                  Link Aggregate
+                </button>
+                {showAggregateDropdown && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: '#1e293b',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 6,
+                    zIndex: 100,
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                  }}>
+                    {availableAggregates.map((agg) => (
+                      <button
+                        key={agg.id}
+                        onClick={() => {
+                          linkEventToAggregate(note.id, agg.id);
+                          setShowAggregateDropdown(false);
+                        }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          background: 'none',
+                          border: 'none',
+                          borderBottom: '1px solid rgba(255,255,255,0.06)',
+                          color: TEXT_MAIN,
+                          fontSize: 12,
+                          padding: '8px 12px',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        <span style={{ fontSize: 10, color: '#b8860b', marginRight: 6, fontWeight: 700 }}>AR</span>
+                        {agg.label || '(Unnamed)'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* State A: No Entity and no Aggregate */
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => onSetEntity?.(note.id)} style={{ ...dashedBtn, flex: 1 }}>
+              + Add Entity
+            </button>
+            {availableAggregates.length > 0 && (
+              <div style={{ position: 'relative', flex: 1 }} ref={aggregateDropdownRef}>
+                <button
+                  onClick={() => setShowAggregateDropdown((v) => !v)}
+                  style={{ ...dashedBtn, width: '100%', borderColor: 'rgba(184,134,11,0.4)', color: 'rgba(184,134,11,0.8)' }}
+                >
+                  Link Aggregate
+                </button>
+                {showAggregateDropdown && (
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    marginTop: 4,
+                    background: '#1e293b',
+                    border: '1px solid rgba(255,255,255,0.12)',
+                    borderRadius: 6,
+                    zIndex: 100,
+                    maxHeight: 180,
+                    overflowY: 'auto',
+                  }}>
+                    {availableAggregates.map((agg) => (
+                      <button
+                        key={agg.id}
+                        onClick={() => {
+                          linkEventToAggregate(note.id, agg.id);
+                          setShowAggregateDropdown(false);
+                        }}
+                        style={{
+                          display: 'block',
+                          width: '100%',
+                          textAlign: 'left',
+                          background: 'none',
+                          border: 'none',
+                          borderBottom: '1px solid rgba(255,255,255,0.06)',
+                          color: TEXT_MAIN,
+                          fontSize: 12,
+                          padding: '8px 12px',
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'none'; }}
+                      >
+                        <span style={{ fontSize: 10, color: '#b8860b', marginRight: 6, fontWeight: 700 }}>AR</span>
+                        {agg.label || '(Unnamed)'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {divider}
+
+      {/* COMMAND */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Command</SectionLabel>
+        {linkedCommand ? (
+          <input
+            type="text"
+            value={linkedCommand.label}
+            placeholder="(Unnamed Command)"
+            onChange={(e) => updateNote(linkedCommand.id, { label: e.target.value })}
+            style={nameInput('30,136,229')}
+          />
+        ) : (
+          <button onClick={() => onAddCommand?.(note.id)} style={dashedBtn}>+ Add Command</button>
+        )}
+      </div>
+
+      {/* INFORMATION */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Information (Command Input)</SectionLabel>
+        {linkedCommand ? (
+          <PropertyTable
+            properties={localInfo}
+            onChange={(updated) => {
+              setLocalInfo(updated);
+              updateCommandInformation(linkedCommand.id, updated);
+            }}
+          />
+        ) : (
+          <div style={{ fontSize: 11, color: TEXT_MUTED, fontStyle: 'italic' }}>
+            Link a command first to edit input parameters
+          </div>
+        )}
+      </div>
+
+      {divider}
+
+      {/* EVENT OUTPUT */}
+      <div style={{ marginBottom: 16 }}>
+        <SectionLabel>Event Output</SectionLabel>
+        <PropertyTable
+          properties={localEventProps}
+          onChange={(updated) => {
+            setLocalEventProps(updated);
+            updateEventProperties(note.id, updated);
+          }}
+        />
+      </div>
+
+      {/* PATHS */}
+      {flowPaths.length > 0 && (
+        <>
+          {divider}
+          <div style={{ marginBottom: 16 }}>
+            <SectionLabel>Paths</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {flowPaths.map((fp) => (
+                <label key={fp.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, color: TEXT_DIM }}>
+                  <input type="checkbox" checked={notePaths.includes(fp.id)} onChange={() => togglePath(fp.id)} style={{ accentColor: fp.color }} />
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: fp.color, flexShrink: 0 }} />
+                  {fp.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {divider}
+
+      {/* NOTES */}
+      <div>
+        <SectionLabel>Notes</SectionLabel>
+        <textarea
+          value={notesMeta}
+          placeholder="Add notes..."
+          onChange={(e) => setNotesMeta(e.target.value)}
+          onBlur={() => updateNote(note.id, { notes: notesMeta })}
+          rows={3}
+          style={{
+            width: '100%',
+            background: 'rgba(255,255,255,0.06)',
+            border: `1px solid ${BORDER_COLOR}`,
+            borderRadius: 4,
+            color: TEXT_MAIN,
+            fontSize: 12,
+            padding: '6px 8px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            resize: 'none',
+            boxSizing: 'border-box',
+            lineHeight: 1.5,
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ─── Entity Panel ─────────────────────────────────────────────────────────────
+
+interface EntityPanelProps {
+  note: StickyNote;
+  flowPaths: FlowPath[];
+}
+
+const EntityPanel: React.FC<EntityPanelProps> = ({ note, flowPaths }) => {
+  const { updateNote, setEntityAsAggregateRoot } = useBoardStore();
+  const [notes, setNotes] = useState(note.notes ?? '');
+
+  useEffect(() => {
+    setNotes(note.notes ?? '');
+  }, [note.id]);
+
+  const saveNotes = useCallback(() => {
+    updateNote(note.id, { notes });
+  }, [note.id, notes, updateNote]);
+
+  const togglePath = (pathId: string) => {
+    const current = note.paths ?? [];
+    const updated = current.includes(pathId)
+      ? current.filter((p) => p !== pathId)
+      : [...current, pathId];
+    updateNote(note.id, { paths: updated });
   };
 
   const notePaths = note.paths ?? [];
@@ -317,179 +764,28 @@ const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flo
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        background: '#FF8C00',
+        background: '#FFD600',
         borderRadius: 4,
         padding: '3px 8px',
         marginBottom: 16,
       }}>
-        <span style={{ fontSize: 11, fontWeight: 600, color: '#fff' }}>Domain Event</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: '#333333' }}>Entity</span>
       </div>
 
-      {/* LINKED COMMAND section */}
+      {/* AGGREGATE ROOT section */}
       <div style={{ marginBottom: 16 }}>
-        <SectionLabel>Linked Command</SectionLabel>
-        {linkedCommand ? (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            background: 'rgba(30,136,229,0.12)',
-            border: '1px solid rgba(30,136,229,0.3)',
-            borderRadius: 6,
-            padding: '6px 10px',
-          }}>
-            <div style={{
-              width: 8,
-              height: 8,
-              borderRadius: 2,
-              background: '#1E88E5',
-              flexShrink: 0,
-            }} />
-            <span style={{ fontSize: 12, color: '#93c5fd', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {linkedCommand.label || '(Unnamed Command)'}
-            </span>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-            No command linked — use [+ Command] on the note
-          </div>
-        )}
-      </div>
-
-      {/* PROPERTIES tabs — Information (Command input) + Event (output) */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderBottom: `1px solid ${BORDER_COLOR}` }}>
-          {(['information', 'event'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              style={{
-                padding: '6px 12px',
-                background: 'none',
-                border: 'none',
-                borderBottom: activeTab === tab ? '2px solid #3b82f6' : '2px solid transparent',
-                color: activeTab === tab ? TEXT_MAIN : TEXT_DIM,
-                cursor: 'pointer',
-                fontSize: 12,
-                fontWeight: activeTab === tab ? 600 : 400,
-                fontFamily: 'inherit',
-                marginBottom: -1,
-              }}
-            >
-              {tab === 'information' ? 'Command Input' : 'Event Output'}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === 'information' && (
-          <div>
-            {!linkedCommand && (
-              <div style={{ fontSize: 11, color: TEXT_MUTED, fontStyle: 'italic', marginBottom: 8 }}>
-                Link a command first to edit input parameters
-              </div>
-            )}
-            <PropertyTable
-              properties={localInfo}
-              onChange={(updated) => {
-                setLocalInfo(updated);
-                if (linkedCommand) {
-                  updateCommandInformation(linkedCommand.id, updated);
-                }
-              }}
-            />
-            {linkedCommand && localInfo.length > 0 && (
-              <button
-                onClick={saveInformation}
-                style={{
-                  marginTop: 6,
-                  background: 'rgba(59,130,246,0.15)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  borderRadius: 4,
-                  color: '#93c5fd',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Save
-              </button>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'event' && (
-          <div>
-            <PropertyTable
-              properties={localEventProps}
-              onChange={(updated) => {
-                setLocalEventProps(updated);
-                updateEventProperties(note.id, updated);
-              }}
-            />
-            {localEventProps.length > 0 && (
-              <button
-                onClick={saveEventProperties}
-                style={{
-                  marginTop: 6,
-                  background: 'rgba(59,130,246,0.15)',
-                  border: '1px solid rgba(59,130,246,0.3)',
-                  borderRadius: 4,
-                  color: '#93c5fd',
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  padding: '4px 10px',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Save
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Divider */}
-      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 16 }} />
-
-      {/* LINKED ENTITY section */}
-      <div style={{ marginBottom: 16 }}>
-        <SectionLabel>Linked Entity (Aggregate)</SectionLabel>
-        {linkedEntity ? (
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            background: 'rgba(255,214,0,0.1)',
-            border: '1px solid rgba(255,214,0,0.25)',
-            borderRadius: 6,
-            padding: '6px 10px',
-          }}>
-            <span style={{ fontSize: 12, color: '#fde047', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {linkedEntity.label || '(Unnamed Aggregate)'}
-            </span>
-            <button
-              onClick={handleUnlinkEntity}
-              title="Remove entity link"
-              style={{
-                background: 'none',
-                border: 'none',
-                color: TEXT_MUTED,
-                cursor: 'pointer',
-                fontSize: 14,
-                padding: '0 0 0 8px',
-                lineHeight: 1,
-                flexShrink: 0,
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ) : (
-          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-            No entity linked — use [Set Entity] on the note
-          </div>
-        )}
+        <SectionLabel>Aggregate Root</SectionLabel>
+        <button
+          onClick={() => setEntityAsAggregateRoot(note.id)}
+          style={{
+            background: 'none', border: '1px dashed rgba(184,134,11,0.5)',
+            borderRadius: 4, color: 'rgba(184,134,11,0.8)', cursor: 'pointer',
+            fontSize: 12, padding: '5px 10px', width: '100%',
+            textAlign: 'left', fontFamily: 'inherit',
+          }}
+        >
+          ◈ Mark as Aggregate Root
+        </button>
       </div>
 
       {/* Divider */}
@@ -499,30 +795,14 @@ const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flo
       <div style={{ marginBottom: 16 }}>
         <SectionLabel>Paths</SectionLabel>
         {flowPaths.length === 0 ? (
-          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>
-            No paths created yet
-          </div>
+          <div style={{ fontSize: 12, color: TEXT_MUTED, fontStyle: 'italic' }}>No paths created yet</div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {flowPaths.map((fp) => {
               const checked = notePaths.includes(fp.id);
               return (
-                <label
-                  key={fp.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    cursor: 'pointer',
-                    color: checked ? TEXT_MAIN : TEXT_DIM,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => togglePath(fp.id)}
-                    style={{ accentColor: fp.color, width: 14, height: 14 }}
-                  />
+                <label key={fp.id} style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', color: checked ? TEXT_MAIN : TEXT_DIM }}>
+                  <input type="checkbox" checked={checked} onChange={() => togglePath(fp.id)} style={{ accentColor: fp.color, width: 14, height: 14 }} />
                   <span style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: fp.color, flexShrink: 0 }} />
                   <span style={{ fontSize: 13 }}>{fp.name}</span>
                 </label>
@@ -536,9 +816,9 @@ const DomainEventPanel: React.FC<DomainEventPanelProps> = ({ note, allNotes, flo
       <div>
         <SectionLabel>Notes</SectionLabel>
         <textarea
-          value={notesMeta}
-          onChange={(e) => setNotesMeta(e.target.value)}
-          onBlur={saveNotesMeta}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          onBlur={saveNotes}
           placeholder="Add notes..."
           rows={4}
           style={{
@@ -907,53 +1187,58 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
 
   return (
     <div style={{ padding: '0 16px 24px' }}>
-      {/* Editable color blocks */}
+      {/* Editable color blocks — vertical: Parameters → Func Name → Return Type */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
         marginBottom: 20,
       }}>
-        <EditableColorBlock
-          sectionLabel="Query"
-          labelValue={remodel.queryNote.label}
-          contentValue={queryContent}
-          labelPlaceholder="e.g. GetOrderList"
-          contentPlaceholder="Query description..."
-          bgColor="#bfdbfe"
-          textColor="#1e293b"
-          noLabelInput
-          onLabelChange={() => {}}
-          onContentChange={setQueryContent}
-          onBlur={saveQueryNote}
-        />
-        <EditableColorBlock
-          sectionLabel="Return Type"
-          labelValue={remodel.returnTypeNote.label}
-          contentValue={returnTypeContent}
-          labelPlaceholder="Return type name"
-          contentPlaceholder="Return type description..."
-          bgColor="#bbf7d0"
-          textColor="#1e293b"
-          noLabelInput
-          onLabelChange={() => {}}
-          onContentChange={setReturnTypeContent}
-          onBlur={saveReturnTypeNote}
-        />
-        <EditableColorBlock
-          sectionLabel="Parameters"
-          labelValue={remodel.parameterNote.label}
-          contentValue={parameterContent}
-          labelPlaceholder="Parameter name"
-          contentPlaceholder="Parameter details..."
-          bgColor="#bbf7d0"
-          textColor="#1e293b"
-          fullWidth
-          noLabelInput
-          onLabelChange={() => {}}
-          onContentChange={setParameterContent}
-          onBlur={saveParameterNote}
-        />
+        <div style={{ width: '100%' }}>
+          <EditableColorBlock
+            sectionLabel="PARAMETERS"
+            labelValue={remodel.parameterNote.label}
+            contentValue={parameterContent}
+            labelPlaceholder="Parameter name"
+            contentPlaceholder="Parameter details..."
+            bgColor="#bbf7d0"
+            textColor="#1e293b"
+            noLabelInput
+            onLabelChange={() => {}}
+            onContentChange={setParameterContent}
+            onBlur={saveParameterNote}
+          />
+        </div>
+        <div style={{ width: '100%' }}>
+          <EditableColorBlock
+            sectionLabel="FUNC NAME"
+            labelValue={remodel.queryNote.label}
+            contentValue={queryContent}
+            labelPlaceholder="e.g. GetOrderList"
+            contentPlaceholder="Query description..."
+            bgColor="#bfdbfe"
+            textColor="#1e293b"
+            noLabelInput
+            onLabelChange={() => {}}
+            onContentChange={setQueryContent}
+            onBlur={saveQueryNote}
+          />
+        </div>
+        <div style={{ width: '100%' }}>
+          <EditableColorBlock
+            sectionLabel="RETURN TYPE"
+            labelValue={remodel.returnTypeNote.label}
+            contentValue={returnTypeContent}
+            labelPlaceholder="Return type name"
+            contentPlaceholder="Return type description..."
+            bgColor="#bbf7d0"
+            textColor="#1e293b"
+            noLabelInput
+            onLabelChange={() => {}}
+            onContentChange={setReturnTypeContent}
+            onBlur={saveReturnTypeNote}
+          />
+        </div>
       </div>
 
       {/* Divider */}
@@ -1553,7 +1838,12 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
-export const DetailPanel: React.FC = () => {
+interface DetailPanelProps {
+  onAddCommand?: (noteId: string) => void;
+  onSetEntity?: (noteId: string) => void;
+}
+
+export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEntity }) => {
   const { selectedElementId, selectedElementType, setSelectedElement } = useUIStore();
   const activeBoard = useBoardStore(selectActiveBoard);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -1594,7 +1884,7 @@ export const DetailPanel: React.FC = () => {
     : '';
 
   const subtitle = note
-    ? `${note.type} · ${note.id.slice(0, 6)}`
+    ? `${note.type === 'DomainEvent' ? 'group' : note.type} · ${note.id.slice(0, 6)}`
     : remodel
     ? `read model · ${remodel.id.slice(0, 6)}`
     : '';
@@ -1665,13 +1955,21 @@ export const DetailPanel: React.FC = () => {
       {/* Body */}
       <div style={{ flex: 1, paddingTop: 16 }}>
         {note && note.type === 'DomainEvent' && (
-          <DomainEventPanel
+          <GroupPanel
             note={note}
             allNotes={activeBoard.notes}
             flowPaths={activeBoard.flowPaths}
+            onAddCommand={onAddCommand}
+            onSetEntity={onSetEntity}
           />
         )}
-        {note && note.type !== 'DomainEvent' && (
+        {note && note.type === 'Entity' && (
+          <EntityPanel
+            note={note}
+            flowPaths={activeBoard.flowPaths}
+          />
+        )}
+        {note && note.type !== 'DomainEvent' && note.type !== 'Entity' && (
           <NotePanel note={note} flowPaths={activeBoard.flowPaths} />
         )}
         {remodel && (
