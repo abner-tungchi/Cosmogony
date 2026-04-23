@@ -1,4 +1,10 @@
 import type { StickyNote, Link, FlowPath, Remodel, Property } from './elements';
+import type {
+  AggregateIdentity,
+  DtoField,
+  Invariant,
+  ReturnTypeSpec,
+} from './specs';
 
 export interface Board {
   id: string;
@@ -84,4 +90,22 @@ export interface BoardStore {
 
   // Custom types (project-level)
   addCustomType: (typeName: string) => void;
+
+  // --- Spec Bundle: Aggregate ---
+  updateAggregateIdentity: (noteId: string, identity: AggregateIdentity) => void;
+  updateStateProperties: (noteId: string, stateProperties: Property[]) => void;
+  addInvariant: (noteId: string, invariant: Invariant) => void;
+  updateInvariant: (noteId: string, invariantId: string, updates: Partial<Invariant>) => void;
+  deleteInvariant: (noteId: string, invariantId: string) => void;
+  approveInvariant: (noteId: string, invariantId: string) => void;
+  rejectInvariant: (noteId: string, invariantId: string) => void;
+  restoreInvariant: (noteId: string, invariantId: string) => void;
+
+  // --- Spec Bundle: Dto ---
+  updateDtoFields: (noteId: string, fields: DtoField[]) => void;
+
+  // --- Spec Bundle: Remodel ---
+  updateRemodelBehavior: (remodelId: string, behavior: string) => void;
+  updateRemodelParameters: (remodelId: string, parameters: Property[]) => void;
+  updateRemodelReturnType: (remodelId: string, returnType: ReturnTypeSpec) => void;
 }

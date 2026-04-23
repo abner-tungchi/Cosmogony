@@ -594,10 +594,177 @@ export const useBoardStore = create<BoardStore>()(
             state.project.updatedAt = new Date().toISOString();
           }
         }),
+
+      // ──────────────────────────────────────────────────────────────
+      // Spec Bundle — Aggregate
+      // ──────────────────────────────────────────────────────────────
+
+      updateAggregateIdentity: (noteId, identity) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          note.aggregateIdentity = identity;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      updateStateProperties: (noteId, stateProperties) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          note.stateProperties = stateProperties;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      addInvariant: (noteId, invariant) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          if (!note.invariants) note.invariants = [];
+          note.invariants.push(invariant);
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      updateInvariant: (noteId, invariantId, updates) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || !note.invariants) return;
+          const inv = note.invariants.find((i) => i.id === invariantId);
+          if (!inv) return;
+          Object.assign(inv, updates);
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      deleteInvariant: (noteId, invariantId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || !note.invariants) return;
+          note.invariants = note.invariants.filter((i) => i.id !== invariantId);
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      approveInvariant: (noteId, invariantId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || !note.invariants) return;
+          const inv = note.invariants.find((i) => i.id === invariantId);
+          if (!inv) return;
+          inv.status = 'confirmed';
+          inv.provenance = 'ui';
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      rejectInvariant: (noteId, invariantId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || !note.invariants) return;
+          const inv = note.invariants.find((i) => i.id === invariantId);
+          if (!inv) return;
+          inv.status = 'rejected';
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      restoreInvariant: (noteId, invariantId) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note || !note.invariants) return;
+          const inv = note.invariants.find((i) => i.id === invariantId);
+          if (!inv) return;
+          // Restore from rejected → needs_review if AI-inferred, else confirmed
+          inv.status = inv.provenance === 'assumption' ? 'needs_review' : 'confirmed';
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      // ──────────────────────────────────────────────────────────────
+      // Spec Bundle — Dto
+      // ──────────────────────────────────────────────────────────────
+
+      updateDtoFields: (noteId, fields) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          note.dtoFields = fields;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      // ──────────────────────────────────────────────────────────────
+      // Spec Bundle — Remodel
+      // ──────────────────────────────────────────────────────────────
+
+      updateRemodelBehavior: (remodelId, behavior) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
+          if (!remodel) return;
+          remodel.behavior = behavior;
+          remodel.updatedAt = new Date().toISOString();
+          board.updatedAt = remodel.updatedAt;
+          state.project.updatedAt = remodel.updatedAt;
+        }),
+
+      updateRemodelParameters: (remodelId, parameters) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
+          if (!remodel) return;
+          remodel.parameters = parameters;
+          remodel.updatedAt = new Date().toISOString();
+          board.updatedAt = remodel.updatedAt;
+          state.project.updatedAt = remodel.updatedAt;
+        }),
+
+      updateRemodelReturnType: (remodelId, returnType) =>
+        set((state) => {
+          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          if (!board) return;
+          const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
+          if (!remodel) return;
+          remodel.returnType = returnType;
+          remodel.updatedAt = new Date().toISOString();
+          board.updatedAt = remodel.updatedAt;
+          state.project.updatedAt = remodel.updatedAt;
+        }),
     })),
     {
       name: 'event-storming-board',
-      version: 13,
+      version: 14,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -913,6 +1080,14 @@ export const useBoardStore = create<BoardStore>()(
 
         if (version < 13) {
           // v12 → v13: add behavior field to DomainEvent notes (optional, no migration needed)
+          return persistedState as BoardStore;
+        }
+
+        if (version < 14) {
+          // v13 → v14: add Spec Bundle fields
+          //   - StickyNote: aggregateIdentity, stateProperties, invariants, dtoFields
+          //   - Remodel: behavior, parameters, returnType
+          // All fields are optional; legacy data keeps them undefined. No-op migration.
           return persistedState as BoardStore;
         }
 

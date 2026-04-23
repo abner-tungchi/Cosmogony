@@ -1,3 +1,10 @@
+import type {
+  Invariant,
+  AggregateIdentity,
+  DtoField,
+  ReturnTypeSpec,
+} from './specs';
+
 export type ElementType =
   | 'DomainEvent' | 'Command' | 'Aggregate' | 'Policy'
   | 'ExternalSystem' | 'Actor' | 'ReadModel' | 'Hotspot'
@@ -55,6 +62,14 @@ export interface StickyNote {
   isAggregateRoot?: boolean;          // Entity is designated as Aggregate Root
   linkedAggregateNoteId?: string;     // id of the auto-created Aggregate note linked to this Entity
   groupCollapsed?: boolean;           // DomainEvent: whether its group is collapsed (satellites hidden)
+
+  // --- Aggregate-specific ---
+  aggregateIdentity?: AggregateIdentity;
+  stateProperties?: Property[];
+  invariants?: Invariant[];
+
+  // --- Dto-specific ---
+  dtoFields?: DtoField[];
 }
 
 // BundleSubNote kept only for Remodel compatibility
@@ -100,4 +115,12 @@ export interface Remodel {
   linkedActorId?: string;
   createdAt: string;
   updatedAt: string;
+
+  // --- Structured spec data ---
+  // Semantically, parameterNote / queryNote / returnTypeNote will gradually
+  // become display-only (derived from the structured fields below by the UI).
+  // Converting the existing BundleSubNote fields is out of scope for this task.
+  behavior?: string;
+  parameters?: Property[];
+  returnType?: ReturnTypeSpec;
 }
