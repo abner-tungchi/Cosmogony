@@ -1464,7 +1464,12 @@ Returns { success: true }.`,
 );
 
 // ─── Connect MCP over stdio ────────────────────────────────────────────────
+// Skip stdio in HTTP-only mode (e.g. Docker deployment)
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-process.stderr.write('MCP server ready\n');
+if (process.env.ES_HTTP_ONLY === 'true') {
+  process.stderr.write('MCP server ready (HTTP-only mode, stdio disabled)\n');
+} else {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  process.stderr.write('MCP server ready\n');
+}

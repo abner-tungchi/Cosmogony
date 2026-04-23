@@ -1,0 +1,30 @@
+# Build artefacts
+node_modules
+dist
+
+# Runtime state (mounted as volume at runtime)
+data
+
+# Version control
+.git
+.gitignore
+
+# IDE / OS
+.vscode
+.idea
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.*
+
+# Docs
+CLAUDE.md
+
+# Docker
+Dockerfile
+.dockerignore

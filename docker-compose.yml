@@ -1,0 +1,29 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: event-storming-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - mcp-server
+    restart: unless-stopped
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    container_name: event-storming-mcp-server
+    environment:
+      - ES_HTTP_ONLY=true
+      - NODE_ENV=production
+    volumes:
+      - mcp-data:/app/data
+    expose:
+      - "3333"
+    restart: unless-stopped
+
+volumes:
+  mcp-data:
+    driver: local
