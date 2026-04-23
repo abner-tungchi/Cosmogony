@@ -28,6 +28,59 @@ interface Property {
   type: string;
 }
 
+// ─── Spec Bundle Types (mirrors src/types/specs.ts) ─────────────────────────
+
+interface InvariantRule {
+  when: string;   // "always" | "never" | "<field> <op> <value>"
+  rule: string;   // natural language statement or expression
+}
+
+interface InvariantSource {
+  agent: string;
+  derivedFrom: string[];
+  inferredAt: string;     // ISO timestamp
+  rationale: string;
+}
+
+interface Invariant {
+  id: string;
+  name: string;           // camelCase, e.g. "checkCancellable"
+  title: string;          // human-readable, e.g. "已出貨不可取消"
+  applicability?: string;
+  rules: InvariantRule[];
+  errorCode: string;      // camelCase, e.g. "orderAlreadyShipped"
+  relatedState?: string[];
+  provenance: 'ui' | 'assumption';
+  status: 'confirmed' | 'needs_review' | 'rejected';
+  source?: InvariantSource | null;
+}
+
+interface AggregateIdentity {
+  name: string;               // e.g. "orderId"
+  _suggested_type?: string;   // e.g. "OrderId"
+  _suggested_field?: string;  // e.g. "orderId"
+}
+
+interface DtoField {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  dtoSpecRef?: string;  // reference to another Dto note id
+}
+
+interface ReturnTypeField {
+  name: string;
+  type: string;
+  nullable?: boolean;
+  dtoSpecRef?: string;  // reference to Dto note id
+}
+
+interface ReturnTypeSpec {
+  shape: 'object' | 'array' | 'primitive';
+  fields: ReturnTypeField[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 interface StickyNote {
   id: string;
   type: ElementType;
@@ -49,7 +102,16 @@ interface StickyNote {
   // Visual group fields
   groupEventId?: string;              // Information/Command/Entity → their parent DomainEvent id
   informationForCommandId?: string;   // Information note → which Command it serves
-  aggregateRootId?: string;           // Entity note → which AggregateRoot it belongs to
+  aggregateRootId?: string;           // Entity note → which AggregateRoot it belongs to (legacy)
+  isAggregateRoot?: boolean;          // Entity is designated as Aggregate Root
+  linkedAggregateNoteId?: string;     // id of the auto-created Aggregate note linked to this Entity
+  groupCollapsed?: boolean;           // DomainEvent: whether its group is collapsed
+  // --- Aggregate-specific (Spec Bundle) ---
+  aggregateIdentity?: AggregateIdentity;
+  stateProperties?: Property[];
+  invariants?: Invariant[];
+  // --- Dto-specific (Spec Bundle) ---
+  dtoFields?: DtoField[];
 }
 
 interface BundleSubNote {
@@ -85,6 +147,10 @@ interface Remodel {
   linkedActorId?: string;
   createdAt: string;
   updatedAt: string;
+  // --- Structured spec data (Spec Bundle) ---
+  behavior?: string;
+  parameters?: Property[];
+  returnType?: ReturnTypeSpec;
 }
 
 interface Board {
@@ -1459,6 +1525,358 @@ Returns { success: true }.`,
     saveProject();
     await syncProjectToRelay();
     await broadcast('update_note', { id: entityNoteId, aggregateRootId: aggRootId });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
+  }
+);
+
+// ─── Spec Bundle — Aggregate tools ──────────────────────────────────────────
+
+server.tool(
+  'es_update_aggregate_identity',
+  'Set the identity field definition for an Aggregate note. Creates aggregateIdentity if it does not exist yet. Returns { success: true }.',
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    name: z.string().describe('Identity field name (e.g. "orderId")'),
+    _suggested_type: z.string().optional().describe('Suggested ID type (e.g. "OrderId")'),
+    _suggested_field: z.string().optional().describe('Suggested field name (e.g. "orderId")'),
+  },
+  async ({ noteId, name, _suggested_type, _suggested_field }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate (type: ${note.type}).` }] };
+
+    note.aggregateIdentity = {
+      name,
+      ...(_suggested_type !== undefined ? { _suggested_type } : {}),
+      ...(_suggested_field !== undefined ? { _suggested_field } : {}),
+    };
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, aggregateIdentity: note.aggregateIdentity });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, aggregateIdentity: note.aggregateIdentity }) }] };
+  }
+);
+
+server.tool(
+  'es_update_state_properties',
+  'Batch-replace all state properties on an Aggregate note. Returns { success: true }.',
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    stateProperties: z.array(z.object({
+      attrName: z.string().describe('Property field name (e.g. "totalAmount")'),
+      type: z.string().describe('Property type (e.g. "Decimal", "String", "Integer")'),
+    })).describe('Complete replacement of the aggregate\'s state properties'),
+  },
+  async ({ noteId, stateProperties }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate (type: ${note.type}).` }] };
+
+    note.stateProperties = stateProperties;
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, stateProperties });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, count: stateProperties.length }) }] };
+  }
+);
+
+server.tool(
+  'es_add_invariant',
+  `Append an invariant rule to an Aggregate note's invariants[].
+If the invariant object does not include an id, one is auto-generated.
+AI-inferred invariants should use provenance="assumption" and status="needs_review" with a source object.
+User-authored invariants use provenance="ui" and status="confirmed" with source=null.
+Returns { success: true, invariantId }.`,
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    invariant: z.object({
+      id: z.string().optional().describe('Invariant ID (auto-generated if omitted)'),
+      name: z.string().describe('Semantic identifier in camelCase (e.g. "checkCancellable")'),
+      title: z.string().describe('Human-readable label (e.g. "已出貨不可取消")'),
+      applicability: z.string().optional().describe('Optional condition scope description'),
+      rules: z.array(z.object({
+        when: z.string().describe('"always" | "never" | "<field> <op> <value>"'),
+        rule: z.string().describe('Rule statement or expression'),
+      })).describe('One or more conditional rules'),
+      errorCode: z.string().describe('Error code in camelCase (e.g. "orderAlreadyShipped")'),
+      relatedState: z.array(z.string()).optional().describe('State field names related to this invariant'),
+      provenance: z.enum(['ui', 'assumption']).describe('"ui" = human-authored; "assumption" = AI-inferred'),
+      status: z.enum(['confirmed', 'needs_review', 'rejected']).describe('Review status'),
+      source: z.object({
+        agent: z.string(),
+        derivedFrom: z.array(z.string()),
+        inferredAt: z.string(),
+        rationale: z.string(),
+      }).nullable().optional().describe('Source info for AI-inferred invariants (null for ui-authored)'),
+    }).describe('Invariant definition to append'),
+  },
+  async ({ noteId, invariant }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate (type: ${note.type}).` }] };
+
+    const newInvariant: Invariant = {
+      ...invariant,
+      id: invariant.id ?? uuidv4(),
+    };
+    if (!note.invariants) note.invariants = [];
+    note.invariants.push(newInvariant);
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, invariants: note.invariants });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, invariantId: newInvariant.id }) }] };
+  }
+);
+
+server.tool(
+  'es_update_invariant',
+  'Partially update an existing invariant on an Aggregate note (merge updates into the existing invariant). Returns { success: true }.',
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    invariantId: z.string().describe('ID of the invariant to update'),
+    updates: z.object({
+      name: z.string().optional(),
+      title: z.string().optional(),
+      applicability: z.string().optional(),
+      rules: z.array(z.object({
+        when: z.string(),
+        rule: z.string(),
+      })).optional(),
+      errorCode: z.string().optional(),
+      relatedState: z.array(z.string()).optional(),
+      provenance: z.enum(['ui', 'assumption']).optional(),
+      status: z.enum(['confirmed', 'needs_review', 'rejected']).optional(),
+      source: z.object({
+        agent: z.string(),
+        derivedFrom: z.array(z.string()),
+        inferredAt: z.string(),
+        rationale: z.string(),
+      }).nullable().optional(),
+    }).describe('Fields to update (partial merge — unspecified fields are preserved)'),
+  },
+  async ({ noteId, invariantId, updates }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate.` }] };
+    if (!note.invariants) return { content: [{ type: 'text' as const, text: `Note ${noteId} has no invariants.` }] };
+
+    const idx = note.invariants.findIndex((inv) => inv.id === invariantId);
+    if (idx === -1) return { content: [{ type: 'text' as const, text: `Invariant ${invariantId} not found on note ${noteId}.` }] };
+
+    note.invariants[idx] = { ...note.invariants[idx], ...updates };
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, invariants: note.invariants });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
+  }
+);
+
+server.tool(
+  'es_delete_invariant',
+  'Remove an invariant from an Aggregate note by invariant ID. Returns { success: true, deletedId }.',
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    invariantId: z.string().describe('ID of the invariant to delete'),
+  },
+  async ({ noteId, invariantId }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate.` }] };
+    if (!note.invariants) return { content: [{ type: 'text' as const, text: `Note ${noteId} has no invariants.` }] };
+
+    const before = note.invariants.length;
+    note.invariants = note.invariants.filter((inv) => inv.id !== invariantId);
+    if (note.invariants.length === before) {
+      return { content: [{ type: 'text' as const, text: `Invariant ${invariantId} not found on note ${noteId}.` }] };
+    }
+
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, invariants: note.invariants });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, deletedId: invariantId }) }] };
+  }
+);
+
+server.tool(
+  'es_set_invariant_status',
+  `Set the review status of an invariant on an Aggregate note.
+When status is set to "confirmed" and the current provenance is "assumption", provenance is automatically promoted to "ui" (indicating the user has accepted this AI-inferred rule).
+Returns { success: true, invariantId, status, provenance }.`,
+  {
+    noteId: z.string().describe('ID of the Aggregate note'),
+    invariantId: z.string().describe('ID of the invariant to update'),
+    status: z.enum(['confirmed', 'needs_review', 'rejected']).describe('New review status'),
+  },
+  async ({ noteId, invariantId, status }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Aggregate') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not an Aggregate.` }] };
+    if (!note.invariants) return { content: [{ type: 'text' as const, text: `Note ${noteId} has no invariants.` }] };
+
+    const inv = note.invariants.find((i) => i.id === invariantId);
+    if (!inv) return { content: [{ type: 'text' as const, text: `Invariant ${invariantId} not found on note ${noteId}.` }] };
+
+    inv.status = status;
+    // Promote assumption → ui when user confirms
+    if (status === 'confirmed' && inv.provenance === 'assumption') {
+      inv.provenance = 'ui';
+    }
+
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, invariants: note.invariants });
+    return {
+      content: [{
+        type: 'text' as const,
+        text: JSON.stringify({ success: true, invariantId, status: inv.status, provenance: inv.provenance }),
+      }],
+    };
+  }
+);
+
+// ─── Spec Bundle — Dto tool ──────────────────────────────────────────────────
+
+server.tool(
+  'es_update_dto_fields',
+  'Batch-replace all fields on a Dto note. Returns { success: true }.',
+  {
+    noteId: z.string().describe('ID of the Dto note'),
+    dtoFields: z.array(z.object({
+      name: z.string().describe('Field name (e.g. "orderId")'),
+      type: z.string().describe('Field type (e.g. "String", "Decimal", "UUID")'),
+      nullable: z.boolean().optional().describe('Whether the field is nullable (default false)'),
+      dtoSpecRef: z.string().optional().describe('Reference to another Dto note id for nested DTO'),
+    })).describe('Complete replacement of the DTO\'s field definitions'),
+  },
+  async ({ noteId, dtoFields }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const note = board.notes.find((n) => n.id === noteId);
+    if (!note) return { content: [{ type: 'text' as const, text: `Note ${noteId} not found.` }] };
+    if (note.type !== 'Dto') return { content: [{ type: 'text' as const, text: `Note ${noteId} is not a Dto (type: ${note.type}).` }] };
+
+    note.dtoFields = dtoFields;
+    note.updatedAt = new Date().toISOString();
+    board.updatedAt = note.updatedAt;
+    projectState.updatedAt = note.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_note', { id: noteId, dtoFields });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, count: dtoFields.length }) }] };
+  }
+);
+
+// ─── Spec Bundle — Remodel tools ─────────────────────────────────────────────
+
+server.tool(
+  'es_update_remodel_behavior',
+  'Set the behavior description on a Remodel (narrative of what the query does). Returns { success: true }.',
+  {
+    remodelId: z.string().describe('ID of the Remodel'),
+    behavior: z.string().describe('Natural language description of the query behavior'),
+  },
+  async ({ remodelId, behavior }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const remodel = board.remodels.find((r) => r.id === remodelId);
+    if (!remodel) return { content: [{ type: 'text' as const, text: `Remodel ${remodelId} not found.` }] };
+
+    remodel.behavior = behavior;
+    remodel.updatedAt = new Date().toISOString();
+    board.updatedAt = remodel.updatedAt;
+    projectState.updatedAt = remodel.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_remodel', { id: remodelId, behavior });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
+  }
+);
+
+server.tool(
+  'es_update_remodel_parameters',
+  'Batch-replace all structured query parameters on a Remodel. Returns { success: true }.',
+  {
+    remodelId: z.string().describe('ID of the Remodel'),
+    parameters: z.array(z.object({
+      attrName: z.string().describe('Parameter field name (e.g. "customerId")'),
+      type: z.string().describe('Parameter type (e.g. "UUID", "String")'),
+    })).describe('Complete replacement of the remodel\'s query parameters'),
+  },
+  async ({ remodelId, parameters }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const remodel = board.remodels.find((r) => r.id === remodelId);
+    if (!remodel) return { content: [{ type: 'text' as const, text: `Remodel ${remodelId} not found.` }] };
+
+    remodel.parameters = parameters;
+    remodel.updatedAt = new Date().toISOString();
+    board.updatedAt = remodel.updatedAt;
+    projectState.updatedAt = remodel.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_remodel', { id: remodelId, parameters });
+    return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true, count: parameters.length }) }] };
+  }
+);
+
+server.tool(
+  'es_update_remodel_return_type',
+  'Set the structured return type spec on a Remodel (shape + typed fields). Returns { success: true }.',
+  {
+    remodelId: z.string().describe('ID of the Remodel'),
+    returnType: z.object({
+      shape: z.enum(['object', 'array', 'primitive']).describe('Return type shape'),
+      fields: z.array(z.object({
+        name: z.string().describe('Field name'),
+        type: z.string().describe('Field type (e.g. "String", "Decimal", "OrderItemDto")'),
+        nullable: z.boolean().optional().describe('Whether the field is nullable'),
+        dtoSpecRef: z.string().optional().describe('Reference to a Dto note id for nested DTO'),
+      })).describe('Fields in the return type'),
+    }).describe('Complete return type specification'),
+  },
+  async ({ remodelId, returnType }) => {
+    await loadProjectFromRelay();
+    const board = getActiveBoard();
+    const remodel = board.remodels.find((r) => r.id === remodelId);
+    if (!remodel) return { content: [{ type: 'text' as const, text: `Remodel ${remodelId} not found.` }] };
+
+    remodel.returnType = returnType;
+    remodel.updatedAt = new Date().toISOString();
+    board.updatedAt = remodel.updatedAt;
+    projectState.updatedAt = remodel.updatedAt;
+    saveProject();
+    await syncProjectToRelay();
+    await broadcast('update_remodel', { id: remodelId, returnType });
     return { content: [{ type: 'text' as const, text: JSON.stringify({ success: true }) }] };
   }
 );
