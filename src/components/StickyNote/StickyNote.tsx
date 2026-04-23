@@ -5,6 +5,7 @@ import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { PathDots } from '../PathBar/PathDots';
+import { deriveDtoContent } from '../../utils/dtoDerived';
 
 // ─── Dto Note Body ────────────────────────────────────────────────────────────
 
@@ -13,12 +14,20 @@ const DTO_MONO_FONT = '"Menlo", "Monaco", "Courier New", monospace';
 interface DtoNoteBodyProps {
   label: string;
   textColor: string;
+  /**
+   * Field lines derived from structured `dtoFields`. When provided, this is
+   * rendered as the authoritative field list. When null/undefined, we fall
+   * back to any legacy content embedded in `label` (lines after the first).
+   */
+  derivedContent?: string | null;
 }
 
-const DtoNoteBody: React.FC<DtoNoteBodyProps> = ({ label, textColor }) => {
+const DtoNoteBody: React.FC<DtoNoteBodyProps> = ({ label, textColor, derivedContent }) => {
   const lines = label.split('\n');
   const nameLine = lines[0] ?? '';
-  const fieldLines = lines.slice(1).join('\n');
+  const legacyFieldLines = lines.slice(1).join('\n');
+  // Prefer structured dtoFields output over legacy inline label content.
+  const fieldLines = derivedContent ?? legacyFieldLines;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
@@ -145,7 +154,10 @@ export const StickyNote: React.FC<Props> = ({
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     if (isLinkingMode) return;
-    if (isGroupSatellite) return; // Group satellites: edit only via sidebar
+    // Group satellites (Command / Information / Entity) edit only via sidebar.
+    // Aggregate is a conceptual node — it may share a groupEventId for group-move
+    // tracking, but its label is directly editable like any top-level note.
+    if (isGroupSatellite && !isAggregate) return;
     e.stopPropagation();
     setIsEditing(true);
     setEditText(note.label);
@@ -185,6 +197,15 @@ export const StickyNote: React.FC<Props> = ({
     e.stopPropagation();
     if (isLinkingMode) {
       onLinkClick?.(note.id, 'note');
+      return;
+    }
+    // Aggregate is a conceptual domain node — it may share a groupEventId with a
+    // DomainEvent (for move/link tracking), but clicking it should always select
+    // itself so the AggregatePanel shows. Aggregates are never "just another
+    // group satellite" from the UX perspective.
+    if (isAggregate) {
+      onSelect(note.id, e.shiftKey);
+      onDetailClick?.(note.id);
       return;
     }
     if (isGroupSatellite && !isGroupDomainEventSelected) {
@@ -478,7 +499,11 @@ export const StickyNote: React.FC<Props> = ({
             }}
           />
         ) : isDto ? (
-          <DtoNoteBody label={note.label} textColor={config.textColor} />
+          <DtoNoteBody
+            label={note.label}
+            textColor={config.textColor}
+            derivedContent={deriveDtoContent(note, allNotes)}
+          />
         ) : isInformation ? (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             {/* Information type label */}

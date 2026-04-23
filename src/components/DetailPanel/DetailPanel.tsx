@@ -3,7 +3,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
+import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
+import { AggregatePanel } from './AggregatePanel';
+import { DtoPanel } from './DtoPanel';
+import { ReturnTypeEditor } from './ReturnTypeEditor';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -982,6 +986,140 @@ const NotePanel: React.FC<NotePanelProps> = ({ note, flowPaths }) => {
   );
 };
 
+// ─── Colored block helpers (used inside Remodel Panel) ────────────────────────
+
+interface ColoredStructuredBlockProps {
+  bgColor: string;
+  sectionLabel: string;
+  children: React.ReactNode;
+}
+
+/** Wrapper for the mint-green / blue-gray Remodel section containers with
+ *  a structured editor inside (replaces plain-text EditableColorBlock). */
+const ColoredStructuredBlock: React.FC<ColoredStructuredBlockProps> = ({
+  bgColor, sectionLabel, children,
+}) => (
+  <div style={{
+    backgroundColor: bgColor,
+    borderRadius: 6,
+    padding: '8px 10px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+  }}>
+    <div style={{
+      fontSize: 9,
+      textTransform: 'uppercase',
+      letterSpacing: '0.05em',
+      opacity: 0.6,
+      color: '#1e293b',
+      fontWeight: 600,
+    }}>
+      {sectionLabel}
+    </div>
+    {children}
+  </div>
+);
+
+interface ColoredPropertyTableProps {
+  properties: Property[];
+  onChange: (updated: Property[]) => void;
+  addLabel?: string;
+}
+
+/** PropertyTable variant styled for light-background (colored) Remodel blocks. */
+const ColoredPropertyTable: React.FC<ColoredPropertyTableProps> = ({
+  properties, onChange, addLabel,
+}) => {
+  const inputStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    background: 'rgba(0,0,0,0.08)',
+    border: '1px solid rgba(0,0,0,0.12)',
+    borderRadius: 3,
+    color: '#1e293b',
+    fontSize: 11,
+    padding: '3px 6px',
+    outline: 'none',
+    fontFamily: 'inherit',
+    boxSizing: 'border-box',
+  };
+
+  const headerStyle: React.CSSProperties = {
+    fontSize: 9,
+    color: '#475569',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    fontWeight: 600,
+  };
+
+  return (
+    <div>
+      {properties.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ flex: 1, ...headerStyle }}>Attr</div>
+            <div style={{ flex: 1, ...headerStyle }}>Type</div>
+            <div style={{ width: 18 }} />
+          </div>
+          {properties.map((prop, i) => (
+            <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input
+                type="text"
+                value={prop.attrName}
+                placeholder="attrName"
+                onChange={(e) => onChange(properties.map((p, idx) => idx === i ? { ...p, attrName: e.target.value } : p))}
+                style={inputStyle}
+              />
+              <input
+                type="text"
+                value={prop.type}
+                placeholder="Type"
+                onChange={(e) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: e.target.value } : p))}
+                style={inputStyle}
+              />
+              <button
+                onClick={() => onChange(properties.filter((_, idx) => idx !== i))}
+                aria-label={`Delete ${prop.attrName || 'field'}`}
+                style={{
+                  width: 18,
+                  height: 18,
+                  background: 'none',
+                  border: 'none',
+                  color: '#475569',
+                  cursor: 'pointer',
+                  fontSize: 14,
+                  padding: 0,
+                  lineHeight: 1,
+                  flexShrink: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={() => onChange([...properties, { attrName: '', type: '' }])}
+        style={{
+          background: 'none',
+          border: '1px dashed rgba(0,0,0,0.2)',
+          borderRadius: 3,
+          color: '#475569',
+          cursor: 'pointer',
+          fontSize: 11,
+          padding: '3px 8px',
+          width: '100%',
+          fontFamily: 'inherit',
+        }}
+      >
+        {addLabel ?? '+ Add'}
+      </button>
+    </div>
+  );
+};
+
 // ─── Remodel Panel ────────────────────────────────────────────────────────────
 
 interface RemodelPanelProps {
@@ -990,12 +1128,17 @@ interface RemodelPanelProps {
 }
 
 const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
-  const { updateRemodel, addNote } = useBoardStore();
+  const {
+    updateRemodel,
+    addNote,
+    updateRemodelBehavior,
+    updateRemodelParameters,
+    updateRemodelReturnType,
+  } = useBoardStore();
 
-  // Local state for sub-note fields
-  const [parameterContent, setParameterContent] = useState(remodel.parameterNote.content);
+  // Local state for sub-note fields (queryNote stays as free text)
   const [queryContent, setQueryContent] = useState(remodel.queryNote.content);
-  const [returnTypeContent, setReturnTypeContent] = useState(remodel.returnTypeNote.content);
+  const [behavior, setBehavior] = useState(remodel.behavior ?? '');
   const [phase, setPhase] = useState(remodel.phase ?? '');
   const [notes, setNotes] = useState(remodel.notes ?? '');
 
@@ -1017,9 +1160,8 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
 
   // Sync when switching between remodels
   useEffect(() => {
-    setParameterContent(remodel.parameterNote.content);
     setQueryContent(remodel.queryNote.content);
-    setReturnTypeContent(remodel.returnTypeNote.content);
+    setBehavior(remodel.behavior ?? '');
     setPhase(remodel.phase ?? '');
     setNotes(remodel.notes ?? '');
     setShowEventDropdown(false);
@@ -1067,17 +1209,13 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
     return () => document.removeEventListener('mousedown', handleOutsideClick);
   }, [showActorDropdown]);
 
-  const saveParameterNote = useCallback(() => {
-    updateRemodel(remodel.id, { parameterNote: { label: remodel.parameterNote.label, content: parameterContent } });
-  }, [remodel.id, remodel.parameterNote.label, parameterContent, updateRemodel]);
-
   const saveQueryNote = useCallback(() => {
     updateRemodel(remodel.id, { queryNote: { label: remodel.queryNote.label, content: queryContent } });
   }, [remodel.id, remodel.queryNote.label, queryContent, updateRemodel]);
 
-  const saveReturnTypeNote = useCallback(() => {
-    updateRemodel(remodel.id, { returnTypeNote: { label: remodel.returnTypeNote.label, content: returnTypeContent } });
-  }, [remodel.id, remodel.returnTypeNote.label, returnTypeContent, updateRemodel]);
+  const saveBehavior = useCallback(() => {
+    updateRemodelBehavior(remodel.id, behavior);
+  }, [remodel.id, behavior, updateRemodelBehavior]);
 
   const saveMeta = useCallback(() => {
     updateRemodel(remodel.id, { phase });
@@ -1185,60 +1323,78 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
     ? allNotes.find((n) => n.id === remodel.linkedActorId)
     : undefined;
 
+  const allDtoNotesForReturnType = allNotes.filter((n) => n.type === 'Dto');
+
+  const returnType: ReturnTypeSpec = remodel.returnType ?? { shape: 'object', fields: [] };
+
   return (
     <div style={{ padding: '0 16px 24px' }}>
-      {/* Editable color blocks — vertical: Parameters → Func Name → Return Type */}
+      {/* Colored structured blocks — vertical: Parameters → Func Name → Return Type */}
       <div style={{
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
         marginBottom: 20,
       }}>
-        <div style={{ width: '100%' }}>
-          <EditableColorBlock
-            sectionLabel="PARAMETERS"
-            labelValue={remodel.parameterNote.label}
-            contentValue={parameterContent}
-            labelPlaceholder="Parameter name"
-            contentPlaceholder="Parameter details..."
-            bgColor="#bbf7d0"
-            textColor="#1e293b"
-            noLabelInput
-            onLabelChange={() => {}}
-            onContentChange={setParameterContent}
-            onBlur={saveParameterNote}
+        {/* PARAMETERS — mint green block */}
+        <ColoredStructuredBlock bgColor="#bbf7d0" sectionLabel="Parameters">
+          <ColoredPropertyTable
+            properties={remodel.parameters ?? []}
+            onChange={(updated) => updateRemodelParameters(remodel.id, updated)}
+            addLabel="+ Add Parameter"
           />
-        </div>
-        <div style={{ width: '100%' }}>
-          <EditableColorBlock
-            sectionLabel="FUNC NAME"
-            labelValue={remodel.queryNote.label}
-            contentValue={queryContent}
-            labelPlaceholder="e.g. GetOrderList"
-            contentPlaceholder="Query description..."
-            bgColor="#bfdbfe"
-            textColor="#1e293b"
-            noLabelInput
-            onLabelChange={() => {}}
-            onContentChange={setQueryContent}
-            onBlur={saveQueryNote}
+        </ColoredStructuredBlock>
+
+        {/* FUNC NAME — blue-gray block, kept as plain textarea (user types query name) */}
+        <EditableColorBlock
+          sectionLabel="FUNC NAME"
+          labelValue={remodel.queryNote.label}
+          contentValue={queryContent}
+          labelPlaceholder="e.g. GetOrderList"
+          contentPlaceholder="e.g. GetOrderList"
+          bgColor="#bfdbfe"
+          textColor="#1e293b"
+          noLabelInput
+          onLabelChange={() => {}}
+          onContentChange={setQueryContent}
+          onBlur={saveQueryNote}
+        />
+
+        {/* RETURN TYPE — mint green block */}
+        <ColoredStructuredBlock bgColor="#bbf7d0" sectionLabel="Return Type">
+          <ReturnTypeEditor
+            returnType={returnType}
+            allDtoNotes={allDtoNotesForReturnType}
+            onChange={(updated) => updateRemodelReturnType(remodel.id, updated)}
           />
-        </div>
-        <div style={{ width: '100%' }}>
-          <EditableColorBlock
-            sectionLabel="RETURN TYPE"
-            labelValue={remodel.returnTypeNote.label}
-            contentValue={returnTypeContent}
-            labelPlaceholder="Return type name"
-            contentPlaceholder="Return type description..."
-            bgColor="#bbf7d0"
-            textColor="#1e293b"
-            noLabelInput
-            onLabelChange={() => {}}
-            onContentChange={setReturnTypeContent}
-            onBlur={saveReturnTypeNote}
-          />
-        </div>
+        </ColoredStructuredBlock>
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderTop: `1px solid ${BORDER_COLOR}`, marginBottom: 16 }} />
+
+      {/* BEHAVIOR */}
+      <div style={{ marginBottom: 20 }}>
+        <SectionLabel>Behavior</SectionLabel>
+        <input
+          type="text"
+          value={behavior}
+          placeholder="e.g. Retrieve orders for customer service"
+          onChange={(e) => setBehavior(e.target.value)}
+          onBlur={saveBehavior}
+          style={{
+            width: '100%',
+            background: 'rgba(255,255,255,0.06)',
+            border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 4,
+            color: TEXT_MAIN,
+            fontSize: 12,
+            padding: '6px 8px',
+            outline: 'none',
+            fontFamily: 'inherit',
+            boxSizing: 'border-box',
+          }}
+        />
       </div>
 
       {/* Divider */}
@@ -1952,26 +2108,36 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEnt
         </div>
       </div>
 
-      {/* Body */}
+      {/* Body — single-path dispatcher (one panel renders per selected note) */}
       <div style={{ flex: 1, paddingTop: 16 }}>
-        {note && note.type === 'DomainEvent' && (
-          <GroupPanel
-            note={note}
-            allNotes={activeBoard.notes}
-            flowPaths={activeBoard.flowPaths}
-            onAddCommand={onAddCommand}
-            onSetEntity={onSetEntity}
-          />
-        )}
-        {note && note.type === 'Entity' && (
-          <EntityPanel
-            note={note}
-            flowPaths={activeBoard.flowPaths}
-          />
-        )}
-        {note && note.type !== 'DomainEvent' && note.type !== 'Entity' && (
-          <NotePanel note={note} flowPaths={activeBoard.flowPaths} />
-        )}
+        {note && (() => {
+          switch (note.type) {
+            case 'DomainEvent':
+              return (
+                <GroupPanel
+                  note={note}
+                  allNotes={activeBoard.notes}
+                  flowPaths={activeBoard.flowPaths}
+                  onAddCommand={onAddCommand}
+                  onSetEntity={onSetEntity}
+                />
+              );
+            case 'Entity':
+              return <EntityPanel note={note} flowPaths={activeBoard.flowPaths} />;
+            case 'Aggregate':
+              return <AggregatePanel note={note} flowPaths={activeBoard.flowPaths} />;
+            case 'Dto':
+              return (
+                <DtoPanel
+                  note={note}
+                  allNotes={activeBoard.notes}
+                  flowPaths={activeBoard.flowPaths}
+                />
+              );
+            default:
+              return <NotePanel note={note} flowPaths={activeBoard.flowPaths} />;
+          }
+        })()}
         {remodel && (
           <RemodelPanel
             remodel={remodel}

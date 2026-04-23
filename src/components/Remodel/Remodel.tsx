@@ -4,6 +4,7 @@ import type { Remodel as RemodelType, BundleSubNote, FlowPath } from '../../type
 import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
 import { useUIStore } from '../../store/uiStore';
 import { COLLAPSED_REMODEL_W, COLLAPSED_REMODEL_H } from '../../utils/linkUtils';
+import { deriveParametersContent, deriveReturnTypeContent } from '../../utils/remodelDerived';
 import { PathDots } from '../PathBar/PathDots';
 
 const SUB_W = 160;
@@ -39,17 +40,23 @@ interface SubNoteProps {
   zoom: number;
   title: string;
   labelPlaceholder?: string;
+  /** If true, double-click does not enter inline edit (structured data is managed in the Detail Panel). */
+  readOnly?: boolean;
+  emptyPlaceholder?: string;
+  /** When true, render content with monospace to emphasize code-like text. */
+  monospace?: boolean;
 }
 
 const SubNote: React.FC<SubNoteProps> = ({
   label, content, bgColor, textColor, offsetX, offsetY, onSave,
-  title, labelPlaceholder,
+  title, labelPlaceholder, readOnly, emptyPlaceholder, monospace,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editLabel, setEditLabel] = useState(label);
   const [editContent, setEditContent] = useState(content);
 
   const handleDoubleClick = (e: React.MouseEvent) => {
+    if (readOnly) return;
     e.stopPropagation();
     setEditLabel(label);
     setEditContent(content);
@@ -152,8 +159,22 @@ const SubNote: React.FC<SubNoteProps> = ({
           <div style={{ fontSize: '11px', fontWeight: 700, marginBottom: 4, opacity: 0.9 }}>
             {label || <span style={{ opacity: 0.5 }}>{labelPlaceholder ?? 'Label'}</span>}
           </div>
-          <div style={{ fontSize: '11px', lineHeight: 1.4, opacity: 0.85, overflow: 'hidden', wordBreak: 'break-word' }}>
-            {content || <span style={{ opacity: 0.4 }}>Double-click to edit</span>}
+          <div
+            style={{
+              fontSize: '11px',
+              lineHeight: 1.4,
+              opacity: 0.85,
+              overflow: 'hidden',
+              wordBreak: 'break-word',
+              whiteSpace: 'pre-wrap',
+              fontFamily: monospace ? '"Courier New", Courier, monospace' : 'inherit',
+            }}
+          >
+            {content || (
+              <span style={{ opacity: 0.4, fontStyle: 'italic', fontFamily: 'inherit' }}>
+                {emptyPlaceholder ?? (readOnly ? 'Edit in Detail Panel' : 'Double-click to edit')}
+              </span>
+            )}
           </div>
         </>
       )}
@@ -574,10 +595,10 @@ export const Remodel: React.FC<Props> = ({
       onMouseDown={(e) => e.stopPropagation()}
       {...dragProps}
     >
-      {/* Parameters (mint green) — left */}
+      {/* Parameters (mint green) — left. Content is derived from structured `parameters` (no legacy fallback). */}
       <SubNote
         label={remodel.parameterNote.label}
-        content={remodel.parameterNote.content}
+        content={deriveParametersContent(remodel.parameters) ?? ''}
         bgColor={COLORS.parameter}
         textColor={COLORS.text}
         offsetX={ENTITY_X}
@@ -586,9 +607,12 @@ export const Remodel: React.FC<Props> = ({
         zoom={zoom}
         title="Parameters"
         labelPlaceholder="Parameters"
+        readOnly
+        monospace
+        emptyPlaceholder="請補欄位"
       />
 
-      {/* Query (blue-gray) — center */}
+      {/* Query (blue-gray) — center. queryNote stays user-editable. */}
       <SubNote
         label={remodel.queryNote.label}
         content={remodel.queryNote.content}
@@ -602,10 +626,10 @@ export const Remodel: React.FC<Props> = ({
         labelPlaceholder="Read Model Name"
       />
 
-      {/* Return Type (mint green) — right */}
+      {/* Return Type (mint green) — right. Content is derived from structured `returnType` (no legacy fallback). */}
       <SubNote
         label={remodel.returnTypeNote.label}
-        content={remodel.returnTypeNote.content}
+        content={deriveReturnTypeContent(remodel.returnType) ?? ''}
         bgColor={COLORS.returnType}
         textColor={COLORS.text}
         offsetX={EVENT_X}
@@ -614,6 +638,9 @@ export const Remodel: React.FC<Props> = ({
         zoom={zoom}
         title="return"
         labelPlaceholder="Return"
+        readOnly
+        monospace
+        emptyPlaceholder="請補欄位"
       />
 
       {/* Collapse button — top left */}
