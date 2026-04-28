@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
 import type { BoardStore, Project } from '../types/board';
 
 // Stable clientId for this browser tab (survives refreshes, new tab = new ID)
+// Uses uuid package instead of crypto.randomUUID() because the latter is only
+// available in secure contexts (HTTPS or localhost) — fails when accessed
+// across hosts via plain HTTP.
 const clientId = (() => {
   const key = 'es-client-id';
   let id = sessionStorage.getItem(key);
   if (!id) {
-    id = crypto.randomUUID();
+    id = uuidv4();
     sessionStorage.setItem(key, id);
   }
   return id;
