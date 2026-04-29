@@ -445,6 +445,11 @@ app.post('/api/board', (req: Request, res: Response) => {
     const senderClientId = req.headers['x-client-id'] as string | undefined;
     projectState = migrateProject(req.body as Project);
     saveProject();
+    // Broadcast the new state to OTHER clients (excluding the sender) so React UI
+    // edits propagate cross-tab. The sender skips applying its own broadcast on the
+    // FE side via the isApplyingRemoteRef guard in apiSync.ts, which also prevents
+    // the echo-loop where applying a remote sync_project would otherwise trigger
+    // another POST → broadcast → POST cycle.
     broadcastExcept('sync_project', projectState, senderClientId);
   }
   res.json({ ok: true });
