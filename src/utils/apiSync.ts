@@ -62,17 +62,23 @@ export function useApiSync() {
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Debounced POST — waits 500ms after last change before sending
+  // Debounced POST — waits 500ms after last change before sending.
+  // activeBoardId and openBoardIds are per-tab UI state and intentionally NOT
+  // sent to the server. If they were, the server would broadcast them via
+  // sync_project and other tabs would have their tab selection overwritten.
+  // (See dispatch sync_project below for the receive-side companion guard.)
   const debouncedPost = useMemo(
     () =>
       debounce((proj: Project) => {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { activeBoardId: _a, openBoardIds: _o, ...sharedProject } = proj;
         fetch('/api/board', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'X-Client-Id': clientId,
           },
-          body: JSON.stringify(proj),
+          body: JSON.stringify(sharedProject),
         }).catch(() => {
           // Silent fail — MCP server not running doesn't affect normal app use
         });
@@ -223,9 +229,48 @@ function dispatch(action: string, payload: unknown, store: BoardStore) {
     case 'rename_board':
       store.renameBoard(p.id as string, p.name as string);
       break;
-    case 'sync_project':
-      store.loadProject(payload as Project);
+    case 'sync_project': {
+      // Preserve per-tab UI state (active context tab + open tab list) when
+      // applying a remote sync_project. Self-heals if local state is corrupt
+      // (e.g. localStorage has undefined activeBoardId from a prior bug):
+      // falls back to a valid board id rather than writing undefined back.
+      //
+      // Read CURRENT local state via getState() — the `store` parameter is a
+      // closure-captured snapshot from when the SSE useEffect mounted (deps []).
+      const incoming = payload as Project;
+      const currentLocal = useBoardStore.getState().project;
+      const validIds = new Set(incoming.boards.map((b) => b.id));
+
+      // Resolve preserved activeBoardId: prefer current local if it points to
+      // a board that exists in incoming; else fall back to incoming's
+      // activeBoardId; else first incoming board.
+      const localActive = currentLocal.activeBoardId;
+      const incomingActive = (incoming as Project & { activeBoardId?: string }).activeBoardId;
+      const preservedActive =
+        localActive && validIds.has(localActive)
+          ? localActive
+          : incomingActive && validIds.has(incomingActive)
+            ? incomingActive
+            : incoming.boards[0]?.id;
+
+      // Resolve preserved openBoardIds: keep current local entries that still
+      // exist in incoming; if none survive, fall back to [activeBoardId].
+      const localOpen = currentLocal.openBoardIds ?? [];
+      const filteredOpen = localOpen.filter((id) => validIds.has(id));
+      const preservedOpen =
+        filteredOpen.length > 0
+          ? filteredOpen
+          : preservedActive
+            ? [preservedActive]
+            : [];
+
+      store.loadProject({
+        ...incoming,
+        activeBoardId: preservedActive ?? '',
+        openBoardIds: preservedOpen,
+      });
       break;
+    }
 
     default:
       // Surface unknown broadcasts so we notice when the server adds a new
