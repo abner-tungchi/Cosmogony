@@ -1,0 +1,41 @@
+{
+  "id": "2026-04-30-active-board-uistore-migration",
+  "file": "docs/tasks/2026-04-30-active-board-uistore-migration.md",
+  "title": "Move activeBoardId / openBoardIds from Project to uiStore",
+  "status": "superseded",
+  "created": "2026-04-30",
+  "depends_on": [],
+  "supersedes": null,
+  "superseded_by": "wire-strip-direct-impl",
+  "reason": "External audit (Codex + Gemini, both --external both) identified 2 HIGH risks (cross-store reactivity loss, MCP server activeBoardId being wiped) plus 4 MEDIUM. User chose Option A (wire-strip) instead — implemented directly in src/utils/apiSync.ts and mcp-server/src/index.ts with 20 LOC, no store refactor.",
+  "discussion": "docs/discussions/2026-04-30-active-board-uistore-migration.md",
+  "preconditions": [
+    "file:src/types/board.ts",
+    "file:src/store/uiStore.ts",
+    "file:src/store/boardStore.ts",
+    "file:src/utils/apiSync.ts",
+    "file:src/components/Homepage/Homepage.tsx",
+    "file:src/components/TabBar/TabBar.tsx",
+    "file:src/components/PathBar/PathBar.tsx",
+    "file:mcp-server/src/index.ts"
+  ],
+  "verification": [],
+  "tags": ["refactor", "ux", "sync", "superseded"],
+  "status_history": [
+    {
+      "status": "ready",
+      "at": "2026-04-30T14:25:00+08:00",
+      "session": "audit-spec internal PASS (4b 5/5, 5b 7/7); 跳過外部審查（--quick）；Rule 1 line-anchor 違規已修正"
+    },
+    {
+      "status": "draft",
+      "at": "2026-04-30T14:50:00+08:00",
+      "session": "audit-spec external review (Codex + Gemini): 2 HIGH (cross-store reactivity loss; MCP activeBoardId wipeout) + 4 MEDIUM (v15 edge cases; persist hydration race; addActorBoard semantic; verification false negatives)"
+    },
+    {
+      "status": "superseded",
+      "at": "2026-04-30T15:10:00+08:00",
+      "session": "User chose Option A (wire-strip). Implemented directly without new spec — 20 LOC across apiSync.ts (debouncedPost destructure + sync_project dispatch preserve) and mcp-server/src/index.ts (POST handler prevActiveBoardId preservation)."
+    }
+  ]
+}
