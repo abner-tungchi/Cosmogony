@@ -78,6 +78,7 @@ export const useBoardStore = create<BoardStore>()(
         const newBoard = createBoard(name);
         set((state) => {
           state.project.boards.push(newBoard);
+          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
           state.project.openBoardIds.push(newBoard.id);
           state.project.activeBoardId = newBoard.id;
           state.project.updatedAt = new Date().toISOString();
@@ -89,6 +90,7 @@ export const useBoardStore = create<BoardStore>()(
         const newBoard = createBoard(name, contextId);
         set((state) => {
           state.project.boards.push(newBoard);
+          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
           if (!state.project.openBoardIds.includes(contextId)) {
             state.project.openBoardIds.push(contextId);
           }
@@ -111,7 +113,8 @@ export const useBoardStore = create<BoardStore>()(
           if (remainingContextBoards.length === 0) return;
 
           state.project.boards = state.project.boards.filter((b: Board) => !toDelete.has(b.id));
-          state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => !toDelete.has(i));
+          const open = Array.isArray(state.project.openBoardIds) ? state.project.openBoardIds : [];
+          state.project.openBoardIds = open.filter((i: string) => !toDelete.has(i));
           if (toDelete.has(state.project.activeBoardId)) {
             state.project.activeBoardId =
               state.project.openBoardIds[0] ?? remainingContextBoards[0].id;
@@ -121,7 +124,8 @@ export const useBoardStore = create<BoardStore>()(
 
       closeBoard: (id) =>
         set((state) => {
-          state.project.openBoardIds = state.project.openBoardIds.filter((i: string) => i !== id);
+          const open = Array.isArray(state.project.openBoardIds) ? state.project.openBoardIds : [];
+          state.project.openBoardIds = open.filter((i: string) => i !== id);
           if (state.project.activeBoardId === id) {
             const closingBoard = state.project.boards.find((b: Board) => b.id === id);
             const fallbackId =
@@ -135,6 +139,7 @@ export const useBoardStore = create<BoardStore>()(
 
       openBoard: (id) =>
         set((state) => {
+          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
           if (!state.project.openBoardIds.includes(id)) {
             state.project.openBoardIds.push(id);
           }
@@ -781,7 +786,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 14,
+      version: 15,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -1105,6 +1110,29 @@ export const useBoardStore = create<BoardStore>()(
           //   - StickyNote: aggregateIdentity, stateProperties, invariants, dtoFields
           //   - Remodel: behavior, parameters, returnType
           // All fields are optional; legacy data keeps them undefined. No-op migration.
+          return persistedState as BoardStore;
+        }
+
+        if (version < 15) {
+          // v14 → v15: heal corrupted activeBoardId / openBoardIds.
+          // Earlier wire-strip work + ad-hoc testing left some users with
+          // localStorage where these fields are undefined or reference
+          // boards that no longer exist; downstream code (.includes(),
+          // .filter(), openBoard mutator) crashes on those values. Normalize
+          // here so persisted state is always usable on rehydrate.
+          const s = persistedState as { project?: Project & { activeBoardId?: string; openBoardIds?: string[] } };
+          if (s.project) {
+            const validIds = new Set(s.project.boards.map((b) => b.id));
+            const fallback = s.project.boards[0]?.id ?? '';
+            if (!s.project.activeBoardId || !validIds.has(s.project.activeBoardId)) {
+              s.project.activeBoardId = fallback;
+            }
+            const arr = Array.isArray(s.project.openBoardIds) ? s.project.openBoardIds : [];
+            const filtered = arr.filter((id) => validIds.has(id));
+            s.project.openBoardIds = filtered.length > 0
+              ? filtered
+              : (fallback ? [fallback] : []);
+          }
           return persistedState as BoardStore;
         }
 
