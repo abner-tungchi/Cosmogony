@@ -82,7 +82,7 @@ export const Homepage: React.FC = () => {
       >
         {/* Existing context cards — only show top-level context boards */}
         {contextBoards.map((board) => {
-          const isOpen = project.openBoardIds.includes(board.id);
+          const isOpen = (project.openBoardIds ?? []).includes(board.id);
           const isDeleting = confirmDeleteId === board.id;
           return (
             <div

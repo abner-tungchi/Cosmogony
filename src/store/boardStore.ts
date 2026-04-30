@@ -42,7 +42,24 @@ export const useBoardStore = create<BoardStore>()(
 
       loadProject: (project) =>
         set((state) => {
-          state.project = project;
+          // Self-heal per-tab UI fields: server / migrated payloads may lack
+          // activeBoardId or openBoardIds (BE's Project type doesn't track them,
+          // and old localStorage may have undefined). Always normalize so
+          // consumers can call .includes() / find() without guards.
+          const validIds = new Set(project.boards.map((b) => b.id));
+          const fallbackId = project.boards[0]?.id ?? '';
+          const activeBoardId =
+            project.activeBoardId && validIds.has(project.activeBoardId)
+              ? project.activeBoardId
+              : fallbackId;
+          const filteredOpen = (project.openBoardIds ?? []).filter((id) => validIds.has(id));
+          const openBoardIds =
+            filteredOpen.length > 0
+              ? filteredOpen
+              : fallbackId
+                ? [fallbackId]
+                : [];
+          state.project = { ...project, activeBoardId, openBoardIds };
         }),
 
       setProjectName: (name) =>

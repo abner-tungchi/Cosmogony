@@ -10,9 +10,12 @@ export const TabBar: React.FC = () => {
   const [editName, setEditName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Only show context-level boards as tabs (not actor sub-boards)
+  // Only show context-level boards as tabs (not actor sub-boards).
+  // openBoardIds may be undefined briefly during persist hydration on a fresh
+  // tab whose localStorage was wiped — guard with ?? [] to avoid a crash.
+  const openBoardIds = project.openBoardIds ?? [];
   const openBoards = project.boards.filter(
-    (b) => project.openBoardIds.includes(b.id) && !b.parentContextId
+    (b) => openBoardIds.includes(b.id) && !b.parentContextId
   );
 
   // When viewing an actor sub-board, highlight the parent context tab instead
@@ -26,7 +29,7 @@ export const TabBar: React.FC = () => {
   const handleClose = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     closeBoard(id);
-    const remaining = project.openBoardIds.filter((i) => i !== id);
+    const remaining = (project.openBoardIds ?? []).filter((i) => i !== id);
     if (remaining.length === 0) {
       setCurrentView('home');
     }
