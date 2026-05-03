@@ -1,0 +1,81 @@
+{
+  "id": "2026-05-02-active-board-uistore-migration-v2",
+  "file": "docs/tasks/2026-05-02-active-board-uistore-migration-v2.md",
+  "title": "Move activeBoardId / openBoardIds from Project to uiStore (v2 — audit-informed)",
+  "status": "done",
+  "completed": "2026-05-02",
+  "created": "2026-05-02",
+  "depends_on": [],
+  "supersedes": "2026-04-30-active-board-uistore-migration",
+  "discussion": "docs/discussions/2026-04-30-active-board-uistore-migration.md",
+  "preconditions": [
+    "file:src/types/board.ts",
+    "file:src/store/uiStore.ts",
+    "file:src/store/boardStore.ts",
+    "file:src/utils/apiSync.ts",
+    "file:src/components/Homepage/Homepage.tsx",
+    "file:src/components/TabBar/TabBar.tsx",
+    "file:src/components/PathBar/PathBar.tsx",
+    "file:src/components/Sidebar/SidebarPalette.tsx",
+    "file:src/components/Modals/ExportModal.tsx",
+    "file:src/components/Board/Board.tsx",
+    "file:src/components/Board/BoardCanvas.tsx",
+    "file:src/components/Remodel/Remodel.tsx",
+    "file:src/components/Links/LinkLayer.tsx",
+    "file:src/components/DetailPanel/DetailPanel.tsx",
+    "file:src/App.tsx",
+    "file:mcp-server/src/index.ts"
+  ],
+  "verification": [
+    "npx tsc --noEmit",
+    "cd mcp-server && npx tsc --noEmit && cd ..",
+    "npm run build",
+    "! grep -rn 'selectActiveBoard' src/",
+    "! grep -rn 'useBoardStore(selectActiveBoard)' src/",
+    "grep -q 'version: 16' src/store/boardStore.ts",
+    "grep -q 'event-storming-ui' src/store/uiStore.ts",
+    "test -f src/store/selectors.ts",
+    "test -f src/hooks/useReconcileUIState.ts",
+    "grep -q 'export function useActiveBoard' src/store/selectors.ts",
+    "grep -q 'export function useReconcileUIState' src/hooks/useReconcileUIState.ts",
+    "grep -q 'useReconcileUIState' src/App.tsx",
+    "! grep -n \"case 'set_active_board'\" src/utils/apiSync.ts",
+    "! grep -n 'onRehydrateStorage' src/store/uiStore.ts",
+    "awk '/loadProject:/,/^      \\),$/' src/store/boardStore.ts | grep -q 'activeBoardId: _a'",
+    "awk '/^function migrateProject/,/^\\}/' mcp-server/src/index.ts | grep -q 'delete.*activeBoardId'",
+    "awk '/app\\.post\\(.\\/api\\/board./,/^\\}\\);\\$/' mcp-server/src/index.ts | grep -q 'prevActiveBoardId'"
+  ],
+  "tags": ["refactor", "ux", "sync", "audit-informed"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-02T15:35:00+08:00",
+      "session": "audit-spec internal 4b PASS (一處 line-anchor 已修); 5b PASS"
+    },
+    {
+      "status": "draft",
+      "at": "2026-05-02T15:55:00+08:00",
+      "session": "audit-spec external Round 1 (Codex only, Gemini timed out): 2 HIGH (Step 8 BE POST 仍需 prevActiveBoardId restore; TS type 不會自動 strip wire payload, FE loadProject + BE migrateProject 須顯式 delete) + 2 MEDIUM (uiStore onRehydrateStorage 跨 store 讀有 TDZ 風險; stale activeBoardId reconcile 缺漏)"
+    },
+    {
+      "status": "draft",
+      "at": "2026-05-02T16:08:00+08:00",
+      "session": "audit-spec external Round 2 (Codex): 1 HIGH (strip 未收斂到 loadProject 本體, init GET 路徑漏網) + 1 MEDIUM (Step 2 + v16 migration 殘留 onRehydrateStorage 描述) + 1 LOW (useReconcileUIState [boards] dep 太敏感). H1 / M4 已解"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-02T16:15:00+08:00",
+      "session": "audit-spec external Round 3 (Codex): 0 HIGH + 1 MEDIUM (介面合約 #1 與後文矛盾, 已修為「runtime 仍須保留 strip」) + 1 LOW (Step 3 #10 + #20 把 BE relay 與 FE call site 分開描述, 已修). 全部 audit-found risk 已收斂. spec 可進 /pickup"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-02T17:00:00+08:00",
+      "session": "/pickup auto-mode start; precondition all OK; proceed Step 1-8 sequentially with incremental verification"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-02T17:30:00+08:00",
+      "session": "All 8 implementation steps complete. Agent verification: 16/16 PASS (FE tsc, BE tsc, no selectActiveBoard, version 16, event-storming-ui key, selectors.ts + useReconcileUIState.ts created, App mounts hook, dispatch set_active_board removed, no onRehydrateStorage, FE/BE strip layers + BE prevActiveBoardId restore intact, npm run build OK). Human verification (cross-tab independence, v15→v16 migration, MCP es_switch_context isolation) deferred to user."
+    }
+  ]
+}

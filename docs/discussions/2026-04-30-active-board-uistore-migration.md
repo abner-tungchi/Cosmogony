@@ -169,8 +169,73 @@ server 的 `project.json` 目前會被 React POST 整份覆蓋，所以也含 `a
 
 ## 參考檔案
 
-- `src/types/board.ts:25-26` —— Project schema 中的兩個欄位
+- `src/types/board.ts` 中的 `Project` interface —— 含這兩個欄位
 - `src/store/boardStore.ts` —— 28+ 處引用，需要逐一改
 - `src/store/uiStore.ts` —— 目標位置
 - `mcp-server/src/index.ts` —— `migrateProject` / `loadProject` 需要 strip
 - `docs/discussions/2026-04-28-sync-mechanism-evaluation.md` —— 上一輪 sync 討論的脈絡
+
+---
+
+## Round 3 — 2026-05-02 重啟 Option B（audit-informed）
+
+### 為什麼回頭做
+
+Round 2 改走 Option A wire-strip 後，連續發現多處 leak 點需要補：
+
+| Commit | 補哪個 leak |
+|---|---|
+| `7fd7ff2` | FE POST strip + sync_project preserve + BE prevActiveBoardId |
+| `5db71a5` | `loadProject` self-heal + UI ?? [] 防禦 |
+| `b85f0d6` | persist v15 migration + actions Array.isArray 防禦 |
+
+User 觀察：「這些都是 workaround」。同意。根因是**型別錯位**：`activeBoardId` / `openBoardIds` 概念上是 per-tab UI state，卻住在 `Project`（共享 wire format）。每補一個 leak 就是承認「又一個地方錯把 UI state 當 shared state」。
+
+### Round 1/2 沒能進 Option B 的原因
+
+Codex + Gemini audit 找出兩個 HIGH risk 我先前沒解：
+
+**H1. Cross-store reactivity loss**：10 個 components 用 `useBoardStore(selectActiveBoard)` 訂閱 active board。把 `activeBoardId` 移到 uiStore 後，selector 內部讀的是 uiStore，但 Zustand 訂閱仍綁在 boardStore → 切換 tab 時不會 re-render → UI 卡死。
+
+**H2. Server-local activeBoardId**：BE `mcp-server/src/index.ts` 也用 `projectState.activeBoardId`（`es_switch_context` / `es_list_contexts` / `es_add_note` 等 MCP tool 依賴）。FE 把欄位移走後 server 怎麼辦？
+
+### Round 3 解法
+
+**對 H1 — 寫 `useActiveBoard()` 組合 hook**：
+```ts
+// src/store/selectors.ts (new)
+export function useActiveBoard(): Board {
+  const boards = useBoardStore((s) => s.project.boards);
+  const activeBoardId = useUIStore((s) => s.activeBoardId);
+  return useMemo(
+    () => boards.find((b) => b.id === activeBoardId) ?? boards[0],
+    [boards, activeBoardId]
+  );
+}
+```
+
+10 個 consumer 全部改用 `useActiveBoard()`。Zustand 對兩個 store 的訂閱都生效，任一改變都觸發 re-render。`selectActiveBoard` selector 整個刪除（不再有意義）。
+
+**對 H2 — 確立兩個獨立 active board**：
+- **FE per-tab**：在 `uiStore`，是「這個瀏覽器 tab 目前看哪個 context」
+- **server-local**：仍在 `projectState.activeBoardId`（BE 自己持有），是「AI 透過 MCP 操作時的 current context」
+- 兩者**不再同步**。MCP `set_active_board` 廣播也廢除（不再 broadcast，僅影響 server-local）
+
+理由：AI 切 context 是 MCP-side concern；user 切 tab 是 browser-side concern。把它們耦合在一起本來就不對（Round 1 決策 8 的「保留 broadcast」是錯的，現在矯正）。
+
+### 對 Round 1 決策的更新
+
+| 原決策 | 修正 |
+|---|---|
+| #8 MCP `set_active_board` 廣播保留 | **撤銷**：不再廣播。MCP 與 FE per-tab 完全脫鉤 |
+| Round 2 整個 Option A workaround | **撤銷**：commits `7fd7ff2` / `5db71a5` / `b85f0d6` 在新 spec 實作完後可整批 revert |
+
+### 三個關鍵 edge case（spec 必涵蓋）
+
+1. **Persist hydration 順序**：boardStore 先 hydrate / uiStore 後 hydrate 中間若有 component render，`activeBoardId` 為空字串 → `useActiveBoard` fallback 至 `boards[0]`，符合預期
+2. **`addBoard` 等 actions 跨 store 寫入**：boardStore 加新 board 後要立刻設為 active，需呼叫 `useUIStore.setState({ activeBoardId: newId })`。不可直接 import uiStore（避免循環），用 lazy import 或事件
+3. **舊 localStorage 既有 v15 migration（前次 commit b85f0d6）會 sanitize 壞掉的欄位**：新 spec 的 v16 migration 把這兩個欄位從 boardStore.project 抽到 uiStore，並 delete 原欄位
+
+### 共識
+
+走 Option B 的修正版（含 H1 / H2 解法）。現有 8 個 workaround commit 在新 spec ship 後 revert 掉。
