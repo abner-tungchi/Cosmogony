@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 import { CanvasBackground } from '../Canvas/CanvasBackground';
 import { StickyNote } from '../StickyNote/StickyNote';
@@ -120,7 +121,7 @@ export const BoardCanvas: React.FC<Props> = ({
   onAddCommand,
   onSetEntity,
 }) => {
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const { updateNote, addNote } = useBoardStore();
   const { zoom, panX, panY, setZoom, setPan, activePath, fitAll, setSelectedNoteIds, setSelectedElement, isLinkingMode } = useUIStore();
   const allPaths: FlowPath[] = activeBoard.flowPaths;

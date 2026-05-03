@@ -2,8 +2,19 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
-import type { Board, Project, BoardStore } from '../types/board';
+import type { Board, Project, BoardStore, UIState } from '../types/board';
 import type { StickyNote, Link, FlowPath, Remodel } from '../types/elements';
+import { useUIStore } from './uiStore';
+
+// Per-tab UI state (activeBoardId / openBoardIds) lives in uiStore so each
+// browser tab keeps its own selection. boardStore actions still need to know
+// which board the user is editing — this helper resolves that on demand,
+// falling back to boards[0] when uiStore hasn't been seeded yet (e.g. before
+// useReconcileUIState has mounted on a fresh tab).
+function findActiveBoard(state: BoardStore): Board | undefined {
+  const id = useUIStore.getState().activeBoardId;
+  return state.project.boards.find((b) => b.id === id) ?? state.project.boards[0];
+}
 
 function createBoard(name: string, parentContextId?: string): Board {
   return {
@@ -25,15 +36,10 @@ const initialProject: Project = {
   id: uuidv4(),
   name: 'My Event Storming Board',
   boards: [initialBoard],
-  activeBoardId: initialBoard.id,
-  openBoardIds: [initialBoard.id],
   customTypes: [],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
-
-export const selectActiveBoard = (state: BoardStore): Board =>
-  state.project.boards.find((b) => b.id === state.project.activeBoardId) ?? state.project.boards[0];
 
 export const useBoardStore = create<BoardStore>()(
   persist(
@@ -42,24 +48,19 @@ export const useBoardStore = create<BoardStore>()(
 
       loadProject: (project) =>
         set((state) => {
-          // Self-heal per-tab UI fields: server / migrated payloads may lack
-          // activeBoardId or openBoardIds (BE's Project type doesn't track them,
-          // and old localStorage may have undefined). Always normalize so
-          // consumers can call .includes() / find() without guards.
-          const validIds = new Set(project.boards.map((b) => b.id));
-          const fallbackId = project.boards[0]?.id ?? '';
-          const activeBoardId =
-            project.activeBoardId && validIds.has(project.activeBoardId)
-              ? project.activeBoardId
-              : fallbackId;
-          const filteredOpen = (project.openBoardIds ?? []).filter((id) => validIds.has(id));
-          const openBoardIds =
-            filteredOpen.length > 0
-              ? filteredOpen
-              : fallbackId
-                ? [fallbackId]
-                : [];
-          state.project = { ...project, activeBoardId, openBoardIds };
+          // Single FE entry point for all incoming Project payloads (initial
+          // GET /api/board, sync_project SSE, future call sites). Project's
+          // TS shape no longer declares activeBoardId / openBoardIds, but the
+          // BE-local Project still carries them and JSON parse keeps them as
+          // real keys — so explicit delete is the runtime strip. This is the
+          // last of the three wire-strip layers; relying on TS alone would
+          // let per-tab UI state leak across tabs again. Reconciling stale
+          // / missing activeBoardId belongs to useReconcileUIState (effect
+          // layer), not here.
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { activeBoardId: _a, openBoardIds: _o, ...sharedProject } =
+            project as Project & { activeBoardId?: string; openBoardIds?: string[] };
+          state.project = sharedProject as Project;
         }),
 
       setProjectName: (name) =>
@@ -78,10 +79,13 @@ export const useBoardStore = create<BoardStore>()(
         const newBoard = createBoard(name);
         set((state) => {
           state.project.boards.push(newBoard);
-          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
-          state.project.openBoardIds.push(newBoard.id);
-          state.project.activeBoardId = newBoard.id;
           state.project.updatedAt = new Date().toISOString();
+        });
+        const ui = useUIStore.getState();
+        const open = Array.isArray(ui.openBoardIds) ? ui.openBoardIds : [];
+        useUIStore.setState({
+          activeBoardId: newBoard.id,
+          openBoardIds: [...open, newBoard.id],
         });
         return newBoard.id;
       },
@@ -90,12 +94,16 @@ export const useBoardStore = create<BoardStore>()(
         const newBoard = createBoard(name, contextId);
         set((state) => {
           state.project.boards.push(newBoard);
-          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
-          if (!state.project.openBoardIds.includes(contextId)) {
-            state.project.openBoardIds.push(contextId);
-          }
-          state.project.activeBoardId = newBoard.id;
           state.project.updatedAt = new Date().toISOString();
+        });
+        // Actor sub-board itself is NOT a tab — only its parent context is.
+        // The tab list ensures `contextId` is open; activeBoardId switches to
+        // the new actor sub-board so the user lands on it immediately.
+        const ui = useUIStore.getState();
+        const open = Array.isArray(ui.openBoardIds) ? ui.openBoardIds : [];
+        useUIStore.setState({
+          activeBoardId: newBoard.id,
+          openBoardIds: open.includes(contextId) ? open : [...open, contextId],
         });
         return newBoard.id;
       },
@@ -113,47 +121,54 @@ export const useBoardStore = create<BoardStore>()(
           if (remainingContextBoards.length === 0) return;
 
           state.project.boards = state.project.boards.filter((b: Board) => !toDelete.has(b.id));
-          const open = Array.isArray(state.project.openBoardIds) ? state.project.openBoardIds : [];
-          state.project.openBoardIds = open.filter((i: string) => !toDelete.has(i));
-          if (toDelete.has(state.project.activeBoardId)) {
-            state.project.activeBoardId =
-              state.project.openBoardIds[0] ?? remainingContextBoards[0].id;
-          }
           state.project.updatedAt = new Date().toISOString();
+          // Defer uiStore mutation outside the immer producer to avoid the
+          // draft / external-store interleaving footgun.
+          queueMicrotask(() => {
+            const ui = useUIStore.getState();
+            const open = Array.isArray(ui.openBoardIds) ? ui.openBoardIds : [];
+            const filteredOpen = open.filter((i) => !toDelete.has(i));
+            const next: Partial<UIState> = { openBoardIds: filteredOpen };
+            if (toDelete.has(ui.activeBoardId)) {
+              next.activeBoardId = filteredOpen[0] ?? remainingContextBoards[0].id;
+            }
+            useUIStore.setState(next);
+          });
         }),
 
-      closeBoard: (id) =>
-        set((state) => {
-          const open = Array.isArray(state.project.openBoardIds) ? state.project.openBoardIds : [];
-          state.project.openBoardIds = open.filter((i: string) => i !== id);
-          if (state.project.activeBoardId === id) {
-            const closingBoard = state.project.boards.find((b: Board) => b.id === id);
-            const fallbackId =
-              closingBoard?.parentContextId ??
-              state.project.openBoardIds[0] ??
-              state.project.boards.find((b: Board) => !b.parentContextId)?.id;
-            state.project.activeBoardId = fallbackId ?? state.project.boards[0].id;
-          }
-          state.project.updatedAt = new Date().toISOString();
-        }),
+      closeBoard: (id) => {
+        const ui = useUIStore.getState();
+        const open = Array.isArray(ui.openBoardIds) ? ui.openBoardIds : [];
+        const remaining = open.filter((i) => i !== id);
+        const next: Partial<UIState> = { openBoardIds: remaining };
+        if (ui.activeBoardId === id) {
+          const state = useBoardStore.getState();
+          const closingBoard = state.project.boards.find((b) => b.id === id);
+          const fallback =
+            closingBoard?.parentContextId ??
+            remaining[0] ??
+            state.project.boards.find((b) => !b.parentContextId)?.id ??
+            state.project.boards[0]?.id ??
+            '';
+          next.activeBoardId = fallback;
+        }
+        useUIStore.setState(next);
+      },
 
-      openBoard: (id) =>
-        set((state) => {
-          if (!Array.isArray(state.project.openBoardIds)) state.project.openBoardIds = [];
-          if (!state.project.openBoardIds.includes(id)) {
-            state.project.openBoardIds.push(id);
-          }
-          state.project.activeBoardId = id;
-          state.project.updatedAt = new Date().toISOString();
-        }),
+      openBoard: (id) => {
+        const ui = useUIStore.getState();
+        const open = Array.isArray(ui.openBoardIds) ? ui.openBoardIds : [];
+        useUIStore.setState({
+          openBoardIds: open.includes(id) ? open : [...open, id],
+          activeBoardId: id,
+        });
+      },
 
-      setActiveBoard: (id) =>
-        set((state) => {
-          if (state.project.boards.some((b: Board) => b.id === id)) {
-            state.project.activeBoardId = id;
-            state.project.updatedAt = new Date().toISOString();
-          }
-        }),
+      setActiveBoard: (id) => {
+        if (useBoardStore.getState().project.boards.some((b) => b.id === id)) {
+          useUIStore.setState({ activeBoardId: id });
+        }
+      },
 
       renameBoard: (id, name) =>
         set((state) => {
@@ -167,7 +182,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addNote: (note) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (board) {
             board.notes.push(note);
             board.updatedAt = new Date().toISOString();
@@ -177,7 +192,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateNote: (id, updates) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === id);
           if (note) {
@@ -200,7 +215,7 @@ export const useBoardStore = create<BoardStore>()(
 
       deleteNote: (id) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
 
           const noteToDelete = board.notes.find((n: StickyNote) => n.id === id);
@@ -252,7 +267,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addLink: (link) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (board) {
             board.links.push(link);
             board.updatedAt = new Date().toISOString();
@@ -262,7 +277,7 @@ export const useBoardStore = create<BoardStore>()(
 
       deleteLink: (id) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           board.links = board.links.filter((l: Link) => l.id !== id);
           board.updatedAt = new Date().toISOString();
@@ -271,7 +286,7 @@ export const useBoardStore = create<BoardStore>()(
 
       clearBoard: () =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (board) {
             board.notes = [];
             board.remodels = [];
@@ -283,7 +298,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addCommandForEvent: (eventNoteId, commandLabel, information) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const eventNote = board.notes.find((n: StickyNote) => n.id === eventNoteId);
           if (!eventNote || eventNote.type !== 'DomainEvent') return;
@@ -358,7 +373,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateCommandInformation: (commandId, information) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === commandId);
           if (!note) return;
@@ -379,7 +394,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateEventProperties: (eventId, eventProperties) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === eventId);
           if (!note) return;
@@ -391,7 +406,7 @@ export const useBoardStore = create<BoardStore>()(
 
       linkEntityToEvent: (eventId, entityId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === eventId);
           if (!note) return;
@@ -403,7 +418,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addEntityForEvent: (eventNoteId, entityLabel) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const eventNote = board.notes.find((n: StickyNote) => n.id === eventNoteId);
           if (!eventNote || eventNote.type !== 'DomainEvent') return;
@@ -448,7 +463,7 @@ export const useBoardStore = create<BoardStore>()(
 
       linkEntityToAggregateRoot: (entityNoteId, aggregateRootId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
           if (!note) return;
@@ -460,7 +475,7 @@ export const useBoardStore = create<BoardStore>()(
 
       unlinkEntityFromAggregateRoot: (entityNoteId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
           if (!note) return;
@@ -472,7 +487,7 @@ export const useBoardStore = create<BoardStore>()(
 
       setEntityAsAggregateRoot: (entityNoteId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === entityNoteId);
           if (!note || note.type !== 'Entity') return;
@@ -491,7 +506,7 @@ export const useBoardStore = create<BoardStore>()(
 
       unsetEntityAsAggregateRoot: (aggregateNoteId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === aggregateNoteId);
           if (!note || note.type !== 'Aggregate') return;
@@ -516,7 +531,7 @@ export const useBoardStore = create<BoardStore>()(
 
       linkEventToAggregate: (eventId, aggregateNoteId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const eventNote = board.notes.find((n: StickyNote) => n.id === eventId);
           if (!eventNote || eventNote.type !== 'DomainEvent') return;
@@ -542,7 +557,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addRemodel: (remodel) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (board) {
             board.remodels.push(remodel);
             board.updatedAt = new Date().toISOString();
@@ -552,7 +567,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateRemodel: (id, updates) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const remodel = board.remodels.find((r: Remodel) => r.id === id);
           if (remodel) {
@@ -565,7 +580,7 @@ export const useBoardStore = create<BoardStore>()(
 
       deleteRemodel: (id) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           board.remodels = board.remodels.filter((r: Remodel) => r.id !== id);
           board.links = board.links.filter((l: Link) => l.fromId !== id && l.toId !== id);
@@ -575,7 +590,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addFlowPath: (flowPath) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (board) {
             board.flowPaths.push(flowPath);
             board.updatedAt = new Date().toISOString();
@@ -585,7 +600,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateFlowPath: (id, updates) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const flowPath = board.flowPaths.find((fp: FlowPath) => fp.id === id);
           if (flowPath) {
@@ -597,7 +612,7 @@ export const useBoardStore = create<BoardStore>()(
 
       deleteFlowPath: (id) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           board.flowPaths = board.flowPaths.filter((fp: FlowPath) => fp.id !== id);
           board.updatedAt = new Date().toISOString();
@@ -623,7 +638,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateAggregateIdentity: (noteId, identity) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note) return;
@@ -635,7 +650,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateStateProperties: (noteId, stateProperties) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note) return;
@@ -647,7 +662,7 @@ export const useBoardStore = create<BoardStore>()(
 
       addInvariant: (noteId, invariant) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note) return;
@@ -660,7 +675,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateInvariant: (noteId, invariantId, updates) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
@@ -674,7 +689,7 @@ export const useBoardStore = create<BoardStore>()(
 
       deleteInvariant: (noteId, invariantId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
@@ -686,7 +701,7 @@ export const useBoardStore = create<BoardStore>()(
 
       approveInvariant: (noteId, invariantId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
@@ -701,7 +716,7 @@ export const useBoardStore = create<BoardStore>()(
 
       rejectInvariant: (noteId, invariantId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
@@ -715,7 +730,7 @@ export const useBoardStore = create<BoardStore>()(
 
       restoreInvariant: (noteId, invariantId) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
@@ -734,7 +749,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateDtoFields: (noteId, fields) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note) return;
@@ -750,7 +765,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateRemodelBehavior: (remodelId, behavior) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
           if (!remodel) return;
@@ -762,7 +777,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateRemodelParameters: (remodelId, parameters) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
           if (!remodel) return;
@@ -774,7 +789,7 @@ export const useBoardStore = create<BoardStore>()(
 
       updateRemodelReturnType: (remodelId, returnType) =>
         set((state) => {
-          const board = state.project.boards.find((b: Board) => b.id === state.project.activeBoardId);
+          const board = findActiveBoard(state);
           if (!board) return;
           const remodel = board.remodels.find((r: Remodel) => r.id === remodelId);
           if (!remodel) return;
@@ -786,7 +801,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 15,
+      version: 16,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -1132,6 +1147,39 @@ export const useBoardStore = create<BoardStore>()(
             s.project.openBoardIds = filtered.length > 0
               ? filtered
               : (fallback ? [fallback] : []);
+          }
+          // Fall through into the v15 → v16 migration below so v14 users land
+          // on v16 in a single rehydrate.
+        }
+
+        if (version <= 15) {
+          // v15 → v16: per-tab UI state moves out of project into the new
+          // event-storming-ui localStorage entry. Write it directly here —
+          // useUIStore hasn't been created yet at migration time, so calling
+          // useUIStore.setState() would throw or silently no-op.
+          const s = persistedState as { project?: Project & { activeBoardId?: string; openBoardIds?: string[] } };
+          if (s.project) {
+            const validIds = new Set(s.project.boards.map((b) => b.id));
+            const fallback = s.project.boards[0]?.id ?? '';
+            const activeBoardId =
+              s.project.activeBoardId && validIds.has(s.project.activeBoardId)
+                ? s.project.activeBoardId
+                : fallback;
+            const open = Array.isArray(s.project.openBoardIds)
+              ? s.project.openBoardIds.filter((id) => validIds.has(id))
+              : [];
+            const openBoardIds = open.length > 0 ? open : (fallback ? [fallback] : []);
+
+            const uiPayload = { state: { activeBoardId, openBoardIds }, version: 1 };
+            try {
+              localStorage.setItem('event-storming-ui', JSON.stringify(uiPayload));
+            } catch {
+              // localStorage full / private mode — uiStore rehydrate will use
+              // the empty initial state, and useReconcileUIState() will fall
+              // back to boards[0] on first React render.
+            }
+            delete s.project.activeBoardId;
+            delete s.project.openBoardIds;
           }
           return persistedState as BoardStore;
         }

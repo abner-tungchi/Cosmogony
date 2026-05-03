@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { UIState } from '../types/board';
 import type { StickyNote, Remodel } from '../types/elements';
 
@@ -41,7 +42,9 @@ interface UIStore extends UIState {
   setSelectedElement: (id: string | null, type: 'note' | 'remodel' | null) => void;
 }
 
-export const useUIStore = create<UIStore>((set, get) => ({
+export const useUIStore = create<UIStore>()(
+  persist(
+    (set, get) => ({
   currentView: 'home',
   activePath: null,
   activeActorFilter: null,
@@ -56,6 +59,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   isLinkingMode: false,
   linkFromId: null,
   linkFromType: null,
+  activeBoardId: '',
+  openBoardIds: [],
 
   setActivePath: (id) => set({ activePath: id }),
   setActiveActorFilter: (actorId) => set({ activeActorFilter: actorId }),
@@ -121,4 +126,20 @@ export const useUIStore = create<UIStore>((set, get) => ({
   },
   setLinkingMode: (enabled) => set({ isLinkingMode: enabled, linkFromId: null, linkFromType: null }),
   setLinkFrom: (id, type) => set({ linkFromId: id, linkFromType: type }),
-}));
+    }),
+    {
+      name: 'event-storming-ui',
+      version: 1,
+      // Only persist per-tab tab-state. Everything else (zoom / pan / selection /
+      // tool / linking / actor filter / activePath / view) is intentionally
+      // ephemeral — refresh resets them. Cross-store reconcile (heal stale
+      // activeBoardId, prune missing openBoardIds) lives in the React effect
+      // layer (useReconcileUIState) to avoid module-init / TDZ coupling
+      // between uiStore and boardStore — no rehydrate hook here.
+      partialize: (state) => ({
+        activeBoardId: state.activeBoardId,
+        openBoardIds: state.openBoardIds,
+      }),
+    },
+  ),
+);

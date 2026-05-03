@@ -5,6 +5,7 @@ import type { Board } from '../../types/board';
 
 export const Homepage: React.FC = () => {
   const { project, addBoard, deleteBoard, openBoard, renameBoard } = useBoardStore();
+  const openBoardIds = useUIStore((s) => s.openBoardIds);
   const { setCurrentView } = useUIStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -82,7 +83,7 @@ export const Homepage: React.FC = () => {
       >
         {/* Existing context cards — only show top-level context boards */}
         {contextBoards.map((board) => {
-          const isOpen = (project.openBoardIds ?? []).includes(board.id);
+          const isOpen = (openBoardIds ?? []).includes(board.id);
           const isDeleting = confirmDeleteId === board.id;
           return (
             <div

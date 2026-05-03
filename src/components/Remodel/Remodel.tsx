@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import type { Remodel as RemodelType, BundleSubNote, FlowPath } from '../../types/elements';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 import { COLLAPSED_REMODEL_W, COLLAPSED_REMODEL_H } from '../../utils/linkUtils';
 import { deriveParametersContent, deriveReturnTypeContent } from '../../utils/remodelDerived';
@@ -207,7 +208,7 @@ const SourceEventsPanel: React.FC<SourceEventsPanelProps> = ({
   sourceEventsExpanded,
   onToggle,
 }) => {
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const sourceEvents: SourceEventItem[] = linkedNoteIds.map((noteId) => {
     const note = activeBoard.notes.find((n) => n.id === noteId);
     if (!note) {

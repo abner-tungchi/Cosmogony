@@ -2,7 +2,8 @@ import React from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { ELEMENT_CONFIGS, PALETTE_TYPE_LIST } from '../../constants/elementTypes';
 import { useUIStore } from '../../store/uiStore';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import type { ElementType, StickyNote as StickyNoteType, Remodel } from '../../types/elements';
 
 interface Props {
@@ -33,7 +34,7 @@ export const SidebarPalette: React.FC<Props> = ({ collapsed, onShowExport, curre
     setSelectedNoteIds, setSelectedElement,
   } = useUIStore();
   const { addBoard, renameBoard, openBoard, project, addNote, addRemodel } = useBoardStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
 
   // Compute canvas center position based on current viewport, pan, and zoom
   const getViewportCenter = () => {

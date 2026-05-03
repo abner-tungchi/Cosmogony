@@ -5,14 +5,17 @@ import { TabBar } from './components/TabBar/TabBar';
 import { PathBar } from './components/PathBar/PathBar';
 import { Homepage } from './components/Homepage/Homepage';
 import { HintBar } from './components/HintBar/HintBar';
-import { useBoardStore, selectActiveBoard } from './store/boardStore';
+import { useBoardStore } from './store/boardStore';
+import { useActiveBoard } from './store/selectors';
 import { useUIStore } from './store/uiStore';
 import { useApiSync } from './utils/apiSync';
+import { useReconcileUIState } from './hooks/useReconcileUIState';
 
 function App() {
   useApiSync();
+  useReconcileUIState();
   const { deleteNote, deleteRemodel } = useBoardStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const {
     selectedNoteIds,
     setSelectedNoteIds,

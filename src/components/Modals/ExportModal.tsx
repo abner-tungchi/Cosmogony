@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { exportToMarkdown } from '../../utils/markdownExporter';
 import { exportBoardAsBundle } from '../../utils/jsonExporter';
 import { buildAiHandoffPrompt } from '../../utils/aiPromptBuilder';
@@ -9,7 +9,7 @@ interface Props {
 }
 
 export const ExportModal: React.FC<Props> = ({ onClose }) => {
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const markdown = exportToMarkdown(activeBoard);
   const [copied, setCopied] = useState(false);
   const [copiedAi, setCopiedAi] = useState(false);

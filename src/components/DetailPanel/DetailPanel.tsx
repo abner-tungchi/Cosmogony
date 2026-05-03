@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useUIStore } from '../../store/uiStore';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
 import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
@@ -2001,7 +2002,7 @@ interface DetailPanelProps {
 
 export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEntity }) => {
   const { selectedElementId, selectedElementType, setSelectedElement } = useUIStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const panelRef = useRef<HTMLDivElement>(null);
 
   const isOpen = selectedElementId !== null;

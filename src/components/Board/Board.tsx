@@ -15,7 +15,8 @@ import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { Minimap } from './Minimap';
 import { AddCommandModal } from '../Modals/AddCommandModal';
 import { SetEntityModal } from '../Modals/SetEntityModal';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 import type { StickyNote as StickyNoteType, Property } from '../../types/elements';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
@@ -39,7 +40,7 @@ const DRAG_DROP_ANIMATION: DropAnimation = {
 
 export const Board: React.FC = () => {
   const { updateNote, updateRemodel, addLink, addCommandForEvent, updateCommandInformation, addEntityForEvent, linkEntityToEvent } = useBoardStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const {
     zoom, panX, panY, setPan,
     selectedNoteIds, setSelectedNoteIds, toggleNoteSelection,

@@ -22,8 +22,6 @@ export interface Project {
   id: string;
   name: string;
   boards: Board[];
-  activeBoardId: string;
-  openBoardIds: string[];   // boards visible as tabs (subset of boards)
   customTypes?: string[];   // user-defined types, shared across the project
   createdAt: string;
   updatedAt: string;
@@ -39,6 +37,8 @@ export interface UIState {
   isLinkingMode: boolean;
   linkFromId: string | null;
   linkFromType: 'note' | 'remodel' | null;
+  activeBoardId: string;
+  openBoardIds: string[];
 }
 
 export interface BoardStore {

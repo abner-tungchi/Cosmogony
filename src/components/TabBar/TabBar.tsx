@@ -1,21 +1,24 @@
 import React, { useState, useRef } from 'react';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 
 export const TabBar: React.FC = () => {
   const { project, setActiveBoard, addBoard, closeBoard, renameBoard } = useBoardStore();
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
+  const openBoardIds = useUIStore((s) => s.openBoardIds);
   const { currentView, setCurrentView, activePath } = useUIStore();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Only show context-level boards as tabs (not actor sub-boards).
-  // openBoardIds may be undefined briefly during persist hydration on a fresh
-  // tab whose localStorage was wiped — guard with ?? [] to avoid a crash.
-  const openBoardIds = project.openBoardIds ?? [];
+  // openBoardIds is per-tab UI state in uiStore now (was previously
+  // project.openBoardIds, which leaked between tabs). The ?? [] guard is
+  // defensive against a half-hydrated uiStore state.
+  const openBoardsList = (openBoardIds ?? []);
   const openBoards = project.boards.filter(
-    (b) => openBoardIds.includes(b.id) && !b.parentContextId
+    (b) => openBoardsList.includes(b.id) && !b.parentContextId
   );
 
   // When viewing an actor sub-board, highlight the parent context tab instead
@@ -29,7 +32,7 @@ export const TabBar: React.FC = () => {
   const handleClose = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     closeBoard(id);
-    const remaining = (project.openBoardIds ?? []).filter((i) => i !== id);
+    const remaining = (openBoardIds ?? []).filter((i) => i !== id);
     if (remaining.length === 0) {
       setCurrentView('home');
     }

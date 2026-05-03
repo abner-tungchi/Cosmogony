@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
+import { useUIStore } from '../store/uiStore';
 import type { BoardStore, Project } from '../types/board';
 import type { FlowPath, Remodel, StickyNote } from '../types/elements';
 
@@ -63,15 +64,17 @@ export function useApiSync() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced POST — waits 500ms after last change before sending.
-  // activeBoardId and openBoardIds are per-tab UI state and intentionally NOT
-  // sent to the server. If they were, the server would broadcast them via
-  // sync_project and other tabs would have their tab selection overwritten.
-  // (See dispatch sync_project below for the receive-side companion guard.)
+  // Strip server-managed UI fields. The Project TS type no longer declares
+  // activeBoardId / openBoardIds, but BE still ships them on GET /api/board
+  // (BE-local Project type retains the fields and JSON parse keeps them as
+  // real keys). Stripping here is one of three wire-strip layers — without
+  // it, per-tab UI state would leak across tabs again.
   const debouncedPost = useMemo(
     () =>
       debounce((proj: Project) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { activeBoardId: _a, openBoardIds: _o, ...sharedProject } = proj;
+        const { activeBoardId: _a, openBoardIds: _o, ...sharedProject } =
+          proj as Project & { activeBoardId?: string; openBoardIds?: string[] };
         fetch('/api/board', {
           method: 'POST',
           headers: {
@@ -223,54 +226,16 @@ function dispatch(action: string, payload: unknown, store: BoardStore) {
     case 'delete_board':
       store.deleteBoard(p.id as string);
       break;
-    case 'set_active_board':
-      store.setActiveBoard(p.id as string);
-      break;
     case 'rename_board':
       store.renameBoard(p.id as string, p.name as string);
       break;
-    case 'sync_project': {
-      // Preserve per-tab UI state (active context tab + open tab list) when
-      // applying a remote sync_project. Self-heals if local state is corrupt
-      // (e.g. localStorage has undefined activeBoardId from a prior bug):
-      // falls back to a valid board id rather than writing undefined back.
-      //
-      // Read CURRENT local state via getState() — the `store` parameter is a
-      // closure-captured snapshot from when the SSE useEffect mounted (deps []).
-      const incoming = payload as Project;
-      const currentLocal = useBoardStore.getState().project;
-      const validIds = new Set(incoming.boards.map((b) => b.id));
-
-      // Resolve preserved activeBoardId: prefer current local if it points to
-      // a board that exists in incoming; else fall back to incoming's
-      // activeBoardId; else first incoming board.
-      const localActive = currentLocal.activeBoardId;
-      const incomingActive = (incoming as Project & { activeBoardId?: string }).activeBoardId;
-      const preservedActive =
-        localActive && validIds.has(localActive)
-          ? localActive
-          : incomingActive && validIds.has(incomingActive)
-            ? incomingActive
-            : incoming.boards[0]?.id;
-
-      // Resolve preserved openBoardIds: keep current local entries that still
-      // exist in incoming; if none survive, fall back to [activeBoardId].
-      const localOpen = currentLocal.openBoardIds ?? [];
-      const filteredOpen = localOpen.filter((id) => validIds.has(id));
-      const preservedOpen =
-        filteredOpen.length > 0
-          ? filteredOpen
-          : preservedActive
-            ? [preservedActive]
-            : [];
-
-      store.loadProject({
-        ...incoming,
-        activeBoardId: preservedActive ?? '',
-        openBoardIds: preservedOpen,
-      });
+    case 'sync_project':
+      // store.loadProject is the FE-side single strip point — it deletes any
+      // activeBoardId / openBoardIds the BE sends, so per-tab UI state does
+      // not leak across tabs. Stale uiStore activeBoardId after a remote
+      // delete-board is healed by useReconcileUIState (App-level effect).
+      store.loadProject(payload as Project);
       break;
-    }
 
     default:
       // Surface unknown broadcasts so we notice when the server adds a new
@@ -294,7 +259,8 @@ function applyBatchFieldUpdate(
   ids: string[],
   update: { paths?: string[]; phase?: string }
 ) {
-  const board = store.project.boards.find((b) => b.id === store.project.activeBoardId);
+  const activeBoardId = useUIStore.getState().activeBoardId;
+  const board = store.project.boards.find((b) => b.id === activeBoardId);
   if (!board) return;
   const noteIds = new Set(board.notes.map((n) => n.id));
   const remodelIds = new Set(board.remodels.map((r) => r.id));

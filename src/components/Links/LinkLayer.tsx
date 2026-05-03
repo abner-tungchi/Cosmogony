@@ -3,12 +3,13 @@ import { useDndMonitor } from '@dnd-kit/core';
 import { LinkArrow } from './LinkArrow';
 import { getAnchorPoints } from '../../utils/linkUtils';
 import type { DragOffset } from '../../utils/linkUtils';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 import type { Link } from '../../types/elements';
 
 export const LinkLayer: React.FC = () => {
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const { deleteLink } = useBoardStore();
   const { zoom, selectedNoteIds } = useUIStore();
   const [drag, setDrag] = useState<DragOffset | null>(null);

@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { useBoardStore, selectActiveBoard } from '../../store/boardStore';
+import { useBoardStore } from '../../store/boardStore';
+import { useActiveBoard } from '../../store/selectors';
 import { useUIStore } from '../../store/uiStore';
 import type { FlowPath } from '../../types/elements';
 import { PathModal } from './PathModal';
@@ -10,10 +11,11 @@ type ContextMenuState =
   | { open: true; pathId: string; x: number; y: number; confirmingDelete: boolean };
 
 export const PathBar: React.FC = () => {
-  const activeBoard = useBoardStore(selectActiveBoard);
+  const activeBoard = useActiveBoard();
   const { addFlowPath, updateFlowPath, deleteFlowPath, addActorBoard, setActiveBoard, renameBoard, deleteBoard } =
     useBoardStore();
   const project = useBoardStore((s) => s.project);
+  const activeBoardId = useUIStore((s) => s.activeBoardId);
   const { activePath, setActivePath, activeActorFilter } = useUIStore();
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -39,9 +41,9 @@ export const PathBar: React.FC = () => {
 
   // Active context: if current board is an actor sub-board, use its parentContextId; else use its own id
   const currentContextId = useMemo(() => {
-    const active = project.boards.find((b) => b.id === project.activeBoardId);
+    const active = project.boards.find((b) => b.id === activeBoardId);
     return active?.parentContextId ?? active?.id ?? null;
-  }, [project.boards, project.activeBoardId]);
+  }, [project.boards, activeBoardId]);
 
   // Actor sub-boards under the current context
   const actorSubBoards = useMemo(() => {
@@ -331,19 +333,19 @@ export const PathBar: React.FC = () => {
               width: '100%',
               padding: '8px 12px',
               border: 'none',
-              background: project.activeBoardId === currentContextId ? 'rgba(59,130,246,0.06)' : 'transparent',
+              background: activeBoardId === currentContextId ? 'rgba(59,130,246,0.06)' : 'transparent',
               textAlign: 'left',
               fontSize: 12,
-              color: project.activeBoardId === currentContextId ? '#3b82f6' : '#1e293b',
-              fontWeight: project.activeBoardId === currentContextId ? 600 : 400,
+              color: activeBoardId === currentContextId ? '#3b82f6' : '#1e293b',
+              fontWeight: activeBoardId === currentContextId ? 600 : 400,
               cursor: 'pointer',
               transition: 'background 100ms ease',
             }}
             onMouseEnter={(e) => {
-              if (project.activeBoardId !== currentContextId) e.currentTarget.style.background = '#f8fafc';
+              if (activeBoardId !== currentContextId) e.currentTarget.style.background = '#f8fafc';
             }}
             onMouseLeave={(e) => {
-              if (project.activeBoardId !== currentContextId) e.currentTarget.style.background = 'transparent';
+              if (activeBoardId !== currentContextId) e.currentTarget.style.background = 'transparent';
             }}
           >
             <span style={{ fontSize: 12 }}>👤</span>
@@ -356,7 +358,7 @@ export const PathBar: React.FC = () => {
 
           {/* Actor sub-board list */}
           {actorSubBoards.map((actorBoard) => {
-            const isSelected = actorBoard.id === project.activeBoardId;
+            const isSelected = actorBoard.id === activeBoardId;
             const isRenaming = renamingActorId === actorBoard.id;
             const isConfirmingDelete = confirmDeleteActorId === actorBoard.id;
 
