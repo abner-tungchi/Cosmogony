@@ -318,6 +318,13 @@ function migrateProject(p: Project): Project {
       }
     }
   }
+  // Strip per-tab UI fields from any incoming wire payload (FE POST, relay
+  // rehydrate, legacy project.json). BE-local Project type still declares
+  // activeBoardId; the POST handler restores its server-local copy after
+  // migrateProject so MCP tools that read projectState.activeBoardId keep
+  // working.
+  delete (p as { activeBoardId?: string }).activeBoardId;
+  delete (p as { openBoardIds?: string[] }).openBoardIds;
   return p;
 }
 
@@ -576,7 +583,10 @@ server.tool(
     projectState.updatedAt = new Date().toISOString();
     saveProject();
     await syncProjectToRelay();
-    await broadcast('set_active_board', { id });
+    // Intentionally no broadcast: AI's "current context" is server-local and
+    // must not retarget the user's active tab. Each browser tab owns its
+    // activeBoardId in uiStore and the FE never receives a set_active_board
+    // event for this action.
     return { content: [{ type: 'text' as const, text: `Switched to context ${id}.` }] };
   }
 );
