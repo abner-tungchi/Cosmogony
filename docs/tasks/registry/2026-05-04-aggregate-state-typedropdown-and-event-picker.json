@@ -1,0 +1,65 @@
+{
+  "id": "2026-05-04-aggregate-state-typedropdown-and-event-picker",
+  "file": "docs/tasks/2026-05-04-aggregate-state-typedropdown-and-event-picker.md",
+  "title": "Aggregate State 編輯器加 TypeDropdown + Pick from Event 功能",
+  "status": "done",
+  "completed": "2026-05-04",
+  "created": "2026-05-04",
+  "depends_on": [],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-04-aggregate-state-typedropdown-and-event-picker.md",
+  "preconditions": [
+    "file:src/components/Modals/AddCommandModal.tsx",
+    "file:src/components/DetailPanel/DetailPanel.tsx",
+    "file:src/components/DetailPanel/AggregatePanel.tsx",
+    "file:src/store/boardStore.ts",
+    "file:src/store/selectors.ts"
+  ],
+  "verification": [
+    "npx tsc --build",
+    "cd mcp-server && npx tsc --noEmit && cd ..",
+    "npm run build",
+    "test -f src/components/shared/TypeDropdown.tsx",
+    "grep -q 'export.*TypeDropdown' src/components/shared/TypeDropdown.tsx",
+    "grep -q 'export.*BUILT_IN_TYPES' src/components/shared/TypeDropdown.tsx",
+    "! grep -n 'const TypeDropdown' src/components/Modals/AddCommandModal.tsx",
+    "! grep -nE '^const BUILT_IN_TYPES' src/components/Modals/AddCommandModal.tsx",
+    "grep -q 'shared/TypeDropdown' src/components/Modals/AddCommandModal.tsx",
+    "grep -q 'shared/TypeDropdown' src/components/DetailPanel/DetailPanel.tsx",
+    "awk '/^const PropertyTable: React/,/^const EditableColorBlock/' src/components/DetailPanel/DetailPanel.tsx | grep -q 'TypeDropdown'",
+    "awk '/^const ColoredPropertyTable: React/,/^\\/\\/ ─.* Remodel Panel/' src/components/DetailPanel/DetailPanel.tsx | grep -vq 'TypeDropdown'",
+    "grep -q 'shared/TypeDropdown' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'Pick from Event' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'No related events yet' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'addCustomType' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'useActiveBoard' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'role=\"listbox\"' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'role=\"option\"' src/components/DetailPanel/AggregatePanel.tsx",
+    "grep -q 'useBoardStore.getState()' src/components/DetailPanel/AggregatePanel.tsx",
+    "! grep -n 'useUIStore' src/components/shared/TypeDropdown.tsx",
+    "! grep -n 'useBoardStore' src/components/shared/TypeDropdown.tsx"
+  ],
+  "tags": ["feature", "ux", "ui"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-04T15:30:00+08:00",
+      "session": "/discuss R1 三方 agreed (S1-S6 全收斂); /write-spec 產出初稿"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-04T15:50:00+08:00",
+      "session": "/audit-spec --quick: 4b 5/5 PASS (初稿 1 高風險已修：line 號錨點 → 語意錨點; 2 中風險已修：spec body 計數矛盾 + handlePickFromEvent 缺 useUIStore import)。5b 7/7 PASS。跳過外部審查（短 spec、R1 全 agreed、純 UI 改動）。"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-04T16:00:00+08:00",
+      "session": "/pickup auto-mode start; 4 steps direct implementation by Claude"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-04T16:30:00+08:00",
+      "session": "All 4 steps complete. Agent verification: 22/22 PASS (FE tsc, BE tsc, npm run build, shared TypeDropdown 抽出 + export, AddCommandModal 不再持副本 + import shared, DetailPanel PropertyTable 換 TypeDropdown 但 ColoredPropertyTable 維持 plain input, AggregatePanel TypeDropdown + EventPropertyPicker + listbox/option ARIA + useBoardStore.getState() stale-closure 防護, shared 元件不反向 import store). Human verification deferred."
+    }
+  ]
+}
