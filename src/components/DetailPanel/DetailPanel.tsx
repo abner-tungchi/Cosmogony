@@ -14,7 +14,22 @@ import { ReturnTypeEditor } from './ReturnTypeEditor';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const PANEL_WIDTH = 360;
+const PANEL_WIDTH_DEFAULT = 360;
+const PANEL_WIDTH_MIN = 280;
+const PANEL_WIDTH_MAX = 720;
+const PANEL_WIDTH_STORAGE_KEY = 'es-detail-panel-width';
+
+function readStoredPanelWidth(): number {
+  try {
+    const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
+    if (!raw) return PANEL_WIDTH_DEFAULT;
+    const n = parseInt(raw, 10);
+    if (Number.isFinite(n)) return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, n));
+  } catch {
+    // localStorage 被禁用 / 隱私模式 → 走預設值
+  }
+  return PANEL_WIDTH_DEFAULT;
+}
 
 const PANEL_BG = '#1e293b';
 const BORDER_COLOR = 'rgba(255,255,255,0.08)';
@@ -2064,8 +2079,61 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEnt
   const { selectedElementId, selectedElementType, setSelectedElement } = useUIStore();
   const activeBoard = useActiveBoard();
   const panelRef = useRef<HTMLDivElement>(null);
+  const [panelWidth, setPanelWidth] = useState<number>(() => readStoredPanelWidth());
+  const [isResizing, setIsResizing] = useState(false);
 
   const isOpen = selectedElementId !== null;
+
+  // Pointer-driven resize. Pointer capture keeps drag state attached to the
+  // handle even when the cursor moves over other elements. Width persists to
+  // localStorage on pointer up, not on every move, to avoid spamming writes.
+  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    setIsResizing(true);
+
+    const onMove = (ev: PointerEvent) => {
+      const next = Math.min(
+        PANEL_WIDTH_MAX,
+        Math.max(PANEL_WIDTH_MIN, window.innerWidth - ev.clientX)
+      );
+      setPanelWidth(next);
+    };
+    const onUp = (ev: PointerEvent) => {
+      const finalWidth = Math.min(
+        PANEL_WIDTH_MAX,
+        Math.max(PANEL_WIDTH_MIN, window.innerWidth - ev.clientX)
+      );
+      try {
+        localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
+      } catch {
+        // localStorage 滿 / 被禁 — 寬度仍維持本 session，只是不持久化
+      }
+      setIsResizing(false);
+      // pointer capture lost guards: see lostpointercapture handler — release
+      // is unnecessary if capture already lost; only call when still held.
+      if (handle.hasPointerCapture(ev.pointerId)) {
+        handle.releasePointerCapture(ev.pointerId);
+      }
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      handle.removeEventListener('lostpointercapture', onLost);
+    };
+    const onLost = () => {
+      setIsResizing(false);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      handle.removeEventListener('lostpointercapture', onLost);
+    };
+
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+    handle.addEventListener('lostpointercapture', onLost);
+  }, []);
 
   // Esc key to close
   useEffect(() => {
@@ -2114,18 +2182,49 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEnt
         right: 0,
         top: 0,
         height: '100vh',
-        width: PANEL_WIDTH,
+        width: panelWidth,
         background: PANEL_BG,
         borderLeft: `1px solid ${BORDER_COLOR}`,
         zIndex: 50,
-        transform: isOpen ? 'translateX(0)' : `translateX(${PANEL_WIDTH}px)`,
-        transition: 'transform 300ms cubic-bezier(0,0,0.2,1)',
+        transform: isOpen ? 'translateX(0)' : `translateX(${panelWidth}px)`,
+        // Disable transition during resize so width tracks the cursor
+        // exactly. Without this, drags briefly lag the pointer.
+        transition: isResizing ? 'none' : 'transform 300ms cubic-bezier(0,0,0.2,1)',
         display: 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
         overflowX: 'hidden',
+        userSelect: isResizing ? 'none' : undefined,
       }}
     >
+      {/* Resize handle on left edge — only visible / interactable while panel is open. */}
+      {isOpen && (
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize detail panel"
+          onPointerDown={handleResizePointerDown}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: 6,
+            height: '100%',
+            cursor: 'col-resize',
+            zIndex: 60,
+            // Hover gives a faint vertical bar; while resizing keep it solid
+            // for visual feedback that the drag is active.
+            background: isResizing ? 'rgba(96, 165, 250, 0.6)' : 'transparent',
+            transition: isResizing ? 'none' : 'background 120ms ease',
+          }}
+          onMouseEnter={(e) => {
+            if (!isResizing) (e.currentTarget as HTMLDivElement).style.background = 'rgba(96, 165, 250, 0.35)';
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizing) (e.currentTarget as HTMLDivElement).style.background = 'transparent';
+          }}
+        />
+      )}
       {/* Header */}
       <div style={{
         padding: '16px 16px 12px',
