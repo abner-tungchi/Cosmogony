@@ -26,6 +26,7 @@ interface FlowPath {
 interface Property {
   attrName: string;
   type: string;
+  dtoSpecRef?: string;  // optional DTO ref; only used by input-side editors (Command information, Remodel parameters)
 }
 
 // ─── Spec Bundle Types (mirrors src/types/specs.ts) ─────────────────────────

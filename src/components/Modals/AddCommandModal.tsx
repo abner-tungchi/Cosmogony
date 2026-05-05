@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import type { Property } from '../../types/elements';
 import { useBoardStore } from '../../store/boardStore';
-import { TypeDropdown } from '../shared/TypeDropdown';
+import { useActiveBoard } from '../../store/selectors';
+import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
 
 interface Props {
   isOpen: boolean;
@@ -46,6 +47,7 @@ export const AddCommandModal: React.FC<Props> = ({
 
   const customTypes = useBoardStore((state) => state.project.customTypes) ?? [];
   const addCustomType = useBoardStore((state) => state.addCustomType);
+  const allDtoNotes = useActiveBoard().notes.filter((n) => n.type === 'Dto');
 
   // Reset/pre-fill form whenever modal opens
   useEffect(() => {
@@ -64,6 +66,12 @@ export const AddCommandModal: React.FC<Props> = ({
   const updateProperty = (index: number, field: 'attrName' | 'type', value: string) => {
     setInformation((prev) =>
       prev.map((p, i) => (i === index ? { ...p, [field]: value } : p))
+    );
+  };
+
+  const updatePropertyTypeAndRef = (index: number, type: string, dtoSpecRef: string | undefined) => {
+    setInformation((prev) =>
+      prev.map((p, i) => (i === index ? { ...p, type, dtoSpecRef } : p))
     );
   };
 
@@ -185,12 +193,23 @@ export const AddCommandModal: React.FC<Props> = ({
                     placeholder="attrName"
                     style={{ ...INPUT_STYLE, flex: 1 }}
                   />
-                  <TypeDropdown
-                    value={prop.type}
-                    onChange={(value) => updateProperty(i, 'type', value)}
-                    customTypes={customTypes}
-                    onAddCustomType={addCustomType}
-                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <TypeOrDtoPicker
+                      value={prop.type}
+                      dtoSpecRef={prop.dtoSpecRef}
+                      allDtoNotes={allDtoNotes}
+                      customTypes={customTypes}
+                      onAddCustomType={addCustomType}
+                      theme="dark"
+                      onPick={(entry) => {
+                        if (entry.kind === 'dto') {
+                          updatePropertyTypeAndRef(i, entry.type, entry.dtoNoteId);
+                        } else {
+                          updatePropertyTypeAndRef(i, entry.type, undefined);
+                        }
+                      }}
+                    />
+                  </div>
                   <button
                     onClick={() => removeProperty(i)}
                     title="Remove property"

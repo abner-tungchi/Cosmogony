@@ -34,6 +34,12 @@ export interface TextFormat {
 export interface Property {
   attrName: string;
   type: string;
+  // Optional structural link to a Dto note. Only used by "input" editors
+  // (Command information, Remodel parameters); other Property editors
+  // (Aggregate state, DomainEvent eventProperties) ignore this field.
+  // Display follows the same dtoDerived invariant as DtoField: when set
+  // and resolvable, the DTO label takes precedence over the raw `type`.
+  dtoSpecRef?: string;
 }
 
 export interface StickyNote {

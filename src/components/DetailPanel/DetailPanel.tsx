@@ -4,6 +4,7 @@ import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { useActiveBoard } from '../../store/selectors';
 import { TypeDropdown } from '../shared/TypeDropdown';
+import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
 import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
 import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
@@ -93,9 +94,18 @@ const InlineField: React.FC<InlineFieldProps> = ({ label, value, placeholder, on
 interface PropertyTableProps {
   properties: Property[];
   onChange: (updated: Property[]) => void;
+  /**
+   * When true, render TypeOrDtoPicker so the row can carry a structural
+   * Property.dtoSpecRef link to a DTO note. Used by input editors only
+   * (Command information). Output editors (DomainEvent eventProperties)
+   * keep the simpler TypeDropdown.
+   */
+  enableDtoRef?: boolean;
+  /** Required when enableDtoRef is true; the active board's DTO notes. */
+  allDtoNotes?: StickyNote[];
 }
 
-const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange }) => {
+const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange, enableDtoRef, allDtoNotes }) => {
   const customTypes = useBoardStore((s) => s.project.customTypes) ?? [];
   const addCustomType = useBoardStore((s) => s.addCustomType);
   const inputBase: React.CSSProperties = {
@@ -132,12 +142,32 @@ const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange }) =
                 }}
                 style={inputBase}
               />
-              <TypeDropdown
-                value={prop.type}
-                onChange={(newType) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: newType } : p))}
-                customTypes={customTypes}
-                onAddCustomType={addCustomType}
-              />
+              {enableDtoRef && allDtoNotes ? (
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <TypeOrDtoPicker
+                    value={prop.type}
+                    dtoSpecRef={prop.dtoSpecRef}
+                    allDtoNotes={allDtoNotes}
+                    customTypes={customTypes}
+                    onAddCustomType={addCustomType}
+                    theme="dark"
+                    onPick={(entry) => {
+                      if (entry.kind === 'dto') {
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: entry.dtoNoteId } : p));
+                      } else {
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: undefined } : p));
+                      }
+                    }}
+                  />
+                </div>
+              ) : (
+                <TypeDropdown
+                  value={prop.type}
+                  onChange={(newType) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: newType } : p))}
+                  customTypes={customTypes}
+                  onAddCustomType={addCustomType}
+                />
+              )}
               <button
                 onClick={() => onChange(properties.filter((_, idx) => idx !== i))}
                 style={{
@@ -660,6 +690,8 @@ const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAd
               setLocalInfo(updated);
               updateCommandInformation(linkedCommand.id, updated);
             }}
+            enableDtoRef
+            allDtoNotes={allNotes.filter((n) => n.type === 'Dto')}
           />
         ) : (
           <div style={{ fontSize: 11, color: TEXT_MUTED, fontStyle: 'italic' }}>
@@ -1025,12 +1057,19 @@ interface ColoredPropertyTableProps {
   properties: Property[];
   onChange: (updated: Property[]) => void;
   addLabel?: string;
+  /** When true, type column uses TypeOrDtoPicker (light theme). Used by
+   *  Remodel parameters (input). */
+  enableDtoRef?: boolean;
+  /** Required when enableDtoRef is true. */
+  allDtoNotes?: StickyNote[];
 }
 
 /** PropertyTable variant styled for light-background (colored) Remodel blocks. */
 const ColoredPropertyTable: React.FC<ColoredPropertyTableProps> = ({
-  properties, onChange, addLabel,
+  properties, onChange, addLabel, enableDtoRef, allDtoNotes,
 }) => {
+  const customTypes = useBoardStore((s) => s.project.customTypes) ?? [];
+  const addCustomType = useBoardStore((s) => s.addCustomType);
   const inputStyle: React.CSSProperties = {
     flex: 1,
     minWidth: 0,
@@ -1071,13 +1110,33 @@ const ColoredPropertyTable: React.FC<ColoredPropertyTableProps> = ({
                 onChange={(e) => onChange(properties.map((p, idx) => idx === i ? { ...p, attrName: e.target.value } : p))}
                 style={inputStyle}
               />
-              <input
-                type="text"
-                value={prop.type}
-                placeholder="Type"
-                onChange={(e) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: e.target.value } : p))}
-                style={inputStyle}
-              />
+              {enableDtoRef && allDtoNotes ? (
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <TypeOrDtoPicker
+                    value={prop.type}
+                    dtoSpecRef={prop.dtoSpecRef}
+                    allDtoNotes={allDtoNotes}
+                    customTypes={customTypes}
+                    onAddCustomType={addCustomType}
+                    theme="light"
+                    onPick={(entry) => {
+                      if (entry.kind === 'dto') {
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: entry.dtoNoteId } : p));
+                      } else {
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: undefined } : p));
+                      }
+                    }}
+                  />
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={prop.type}
+                  placeholder="Type"
+                  onChange={(e) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: e.target.value } : p))}
+                  style={inputStyle}
+                />
+              )}
               <button
                 onClick={() => onChange(properties.filter((_, idx) => idx !== i))}
                 aria-label={`Delete ${prop.attrName || 'field'}`}
@@ -1342,6 +1401,8 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
             properties={remodel.parameters ?? []}
             onChange={(updated) => updateRemodelParameters(remodel.id, updated)}
             addLabel="+ Add Parameter"
+            enableDtoRef
+            allDtoNotes={allDtoNotesForReturnType}
           />
         </ColoredStructuredBlock>
 
