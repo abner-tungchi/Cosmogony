@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { useActiveBoard } from '../../store/selectors';
+import { TypeDropdown } from '../shared/TypeDropdown';
 import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
 import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
@@ -95,6 +96,8 @@ interface PropertyTableProps {
 }
 
 const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange }) => {
+  const customTypes = useBoardStore((s) => s.project.customTypes) ?? [];
+  const addCustomType = useBoardStore((s) => s.addCustomType);
   const inputBase: React.CSSProperties = {
     flex: 1,
     background: 'rgba(255,255,255,0.06)',
@@ -129,15 +132,11 @@ const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange }) =
                 }}
                 style={inputBase}
               />
-              <input
-                type="text"
+              <TypeDropdown
                 value={prop.type}
-                placeholder="String"
-                onChange={(e) => {
-                  const updated = properties.map((p, idx) => idx === i ? { ...p, type: e.target.value } : p);
-                  onChange(updated);
-                }}
-                style={inputBase}
+                onChange={(newType) => onChange(properties.map((p, idx) => idx === i ? { ...p, type: newType } : p))}
+                customTypes={customTypes}
+                onAddCustomType={addCustomType}
               />
               <button
                 onClick={() => onChange(properties.filter((_, idx) => idx !== i))}
