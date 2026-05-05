@@ -1,0 +1,68 @@
+{
+  "id": "2026-05-05-merge-type-and-dto-ref-into-unified-picker",
+  "file": "docs/tasks/2026-05-05-merge-type-and-dto-ref-into-unified-picker.md",
+  "title": "ReturnTypeField / DtoField 的 type + dtoSpecRef 合併為單一 picker",
+  "status": "done",
+  "completed": "2026-05-05",
+  "created": "2026-05-05",
+  "depends_on": [],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-05-merge-type-and-dto-ref-into-unified-picker.md",
+  "preconditions": [
+    "file:src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "file:src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "file:src/components/DetailPanel/DtoPicker.tsx",
+    "file:src/components/shared/TypeDropdown.tsx",
+    "file:src/types/specs.ts",
+    "file:src/utils/dtoDerived.ts"
+  ],
+  "verification": [
+    "npx tsc --build",
+    "cd mcp-server && npx tsc --noEmit && cd ..",
+    "npm run build",
+    "test -f src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'export const TypeOrDtoPicker' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'export type TypeOrDtoEntry' src/components/shared/TypeOrDtoPicker.tsx",
+    "! test -f src/components/DetailPanel/DtoPicker.tsx",
+    "! grep -rEn '\\bDtoPicker\\b' src/",
+    "grep -q 'shared/TypeOrDtoPicker' src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "grep -q 'shared/TypeOrDtoPicker' src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "! grep -n \"from './DtoPicker'\" src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "! grep -n \"from './DtoPicker'\" src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "! grep -n 'shared/TypeDropdown' src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "awk '/^export const ReturnTypeEditor/,/^\\};$/' src/components/DetailPanel/ReturnTypeEditor.tsx | grep -vq '>Ref<'",
+    "awk '/^export const DtoFieldsEditor/,/^\\};$/' src/components/DetailPanel/DtoFieldsEditor.tsx | grep -vq '>Ref<'",
+    "! grep -n 'useBoardStore' src/components/shared/TypeOrDtoPicker.tsx",
+    "! grep -n 'useUIStore' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q \"theme.*'light'\" src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'theme=\"light\"' src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "grep -q 'DTOs on this board' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'Custom Types' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'Built-in' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q \"from './TypeDropdown'\" src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'excludeDtoId={selfId}' src/components/DetailPanel/DtoFieldsEditor.tsx"
+  ],
+  "tags": ["feature", "ux", "ui", "refactor"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-05T16:00:00+08:00",
+      "session": "/discuss R1+R2 三方 agreed (S1-S6 全收斂); /write-spec 產出初稿"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-05T16:15:00+08:00",
+      "session": "/audit-spec --quick: 4b 5/5 PASS; 5b 7/7 PASS。跳過外部審查（discussion R1+R2 三方 agreed、純 UI consolidation 無 wire/persist/sync 改動、user 確認線上無 returnType 資料免 migration）。"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-05T16:30:00+08:00",
+      "session": "/pickup auto-mode start; 4 steps direct implementation by Claude"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-05T16:50:00+08:00",
+      "session": "All 4 steps complete. Agent verification: 24/24 PASS (FE tsc, BE tsc, npm run build, TypeOrDtoPicker created with TypeOrDtoEntry export, DtoPicker.tsx deleted with no \\bDtoPicker\\b residual, ReturnTypeEditor + DtoFieldsEditor switched to TypeOrDtoPicker, Ref column header removed from both, shared 元件 not coupled to store, light theme support, three group headers present, BUILT_IN_TYPES re-imported, excludeDtoId={selfId} preserved). Spec verification grep gate updated from 'DtoPicker' to '\\bDtoPicker\\b' to avoid TypeOrDtoPicker substring false positive."
+    }
+  ]
+}
