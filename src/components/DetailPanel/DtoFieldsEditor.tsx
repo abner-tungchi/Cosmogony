@@ -1,8 +1,9 @@
 import React from 'react';
 import type { DtoField } from '../../types/specs';
 import type { StickyNote } from '../../types/elements';
-import { DtoPicker } from './DtoPicker';
 import { TEXT_MAIN, TEXT_MUTED } from './panelStyles';
+import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
+import { useBoardStore } from '../../store/boardStore';
 
 interface DtoFieldsEditorProps {
   fields: DtoField[];
@@ -21,6 +22,9 @@ export const DtoFieldsEditor: React.FC<DtoFieldsEditorProps> = ({
   selfId,
   onChange,
 }) => {
+  const customTypes = useBoardStore((s) => s.project.customTypes) ?? [];
+  const addCustomType = useBoardStore((s) => s.addCustomType);
+
   const inputStyle: React.CSSProperties = {
     flex: 1,
     minWidth: 0,
@@ -55,7 +59,6 @@ export const DtoFieldsEditor: React.FC<DtoFieldsEditorProps> = ({
             <div style={{ flex: 2, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Name</div>
             <div style={{ flex: 2, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Type</div>
             <div style={{ width: 24, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'center' }}>Null</div>
-            <div style={{ width: 70, fontSize: 9, color: TEXT_MUTED, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Ref</div>
             <div style={{ width: 18 }} />
           </div>
           {fields.map((f, i) => (
@@ -67,13 +70,24 @@ export const DtoFieldsEditor: React.FC<DtoFieldsEditorProps> = ({
                 onChange={(e) => updateField(i, { name: e.target.value })}
                 style={{ ...inputStyle, flex: 2 }}
               />
-              <input
-                type="text"
-                value={f.type}
-                placeholder="String"
-                onChange={(e) => updateField(i, { type: e.target.value })}
-                style={{ ...inputStyle, flex: 2 }}
-              />
+              <div style={{ flex: 2, minWidth: 0 }}>
+                <TypeOrDtoPicker
+                  value={f.type}
+                  dtoSpecRef={f.dtoSpecRef}
+                  allDtoNotes={allDtoNotes}
+                  customTypes={customTypes}
+                  onAddCustomType={addCustomType}
+                  excludeDtoId={selfId}
+                  theme="dark"
+                  onPick={(entry) => {
+                    if (entry.kind === 'dto') {
+                      updateField(i, { type: entry.type, dtoSpecRef: entry.dtoNoteId });
+                    } else {
+                      updateField(i, { type: entry.type, dtoSpecRef: undefined });
+                    }
+                  }}
+                />
+              </div>
               <input
                 type="checkbox"
                 checked={!!f.nullable}
@@ -81,14 +95,6 @@ export const DtoFieldsEditor: React.FC<DtoFieldsEditorProps> = ({
                 onChange={(e) => updateField(i, { nullable: e.target.checked })}
                 style={{ width: 24, height: 16, accentColor: '#4ade80', margin: 0 }}
               />
-              <div style={{ width: 70 }}>
-                <DtoPicker
-                  value={f.dtoSpecRef}
-                  allDtoNotes={allDtoNotes}
-                  excludeId={selfId}
-                  onChange={(id) => updateField(i, { dtoSpecRef: id })}
-                />
-              </div>
               <button
                 onClick={() => deleteField(i)}
                 aria-label={`Delete field ${f.name || i}`}

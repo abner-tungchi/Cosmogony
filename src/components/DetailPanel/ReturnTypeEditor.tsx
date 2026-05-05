@@ -1,7 +1,8 @@
 import React from 'react';
 import type { ReturnTypeField, ReturnTypeSpec } from '../../types/specs';
 import type { StickyNote } from '../../types/elements';
-import { DtoPicker } from './DtoPicker';
+import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
+import { useBoardStore } from '../../store/boardStore';
 
 interface ReturnTypeEditorProps {
   returnType: ReturnTypeSpec;
@@ -23,7 +24,15 @@ export const ReturnTypeEditor: React.FC<ReturnTypeEditorProps> = ({
   textColor = '#1e293b',
   onChange,
 }) => {
+  const customTypes = useBoardStore((s) => s.project.customTypes) ?? [];
+  const addCustomType = useBoardStore((s) => s.addCustomType);
+
   const inputBase: React.CSSProperties = {
+    // minWidth: 0 lets flex children shrink below their default content-based
+    // min-width (inputs default to ~160px from `size` attribute). Without it,
+    // long values like "OrderSummaryDto" push the input wider than its
+    // flex-2 share, mis-aligning header columns vs row columns.
+    minWidth: 0,
     background: 'rgba(0,0,0,0.08)',
     border: '1px solid rgba(0,0,0,0.12)',
     borderRadius: 3,
@@ -121,7 +130,6 @@ export const ReturnTypeEditor: React.FC<ReturnTypeEditorProps> = ({
                 <div style={{ flex: 2, ...headerStyle }}>Name</div>
                 <div style={{ flex: 2, ...headerStyle }}>Type</div>
                 <div style={{ width: 24, ...headerStyle, textAlign: 'center' }}>Null</div>
-                <div style={{ width: 70, ...headerStyle }}>Ref</div>
                 <div style={{ width: 18 }} />
               </div>
               {returnType.fields.map((f, i) => (
@@ -133,13 +141,23 @@ export const ReturnTypeEditor: React.FC<ReturnTypeEditorProps> = ({
                     onChange={(e) => updateField(i, { name: e.target.value })}
                     style={{ ...inputBase, flex: 2 }}
                   />
-                  <input
-                    type="text"
-                    value={f.type}
-                    placeholder="String"
-                    onChange={(e) => updateField(i, { type: e.target.value })}
-                    style={{ ...inputBase, flex: 2 }}
-                  />
+                  <div style={{ flex: 2, minWidth: 0 }}>
+                    <TypeOrDtoPicker
+                      value={f.type}
+                      dtoSpecRef={f.dtoSpecRef}
+                      allDtoNotes={allDtoNotes}
+                      customTypes={customTypes}
+                      onAddCustomType={addCustomType}
+                      theme="light"
+                      onPick={(entry) => {
+                        if (entry.kind === 'dto') {
+                          updateField(i, { type: entry.type, dtoSpecRef: entry.dtoNoteId });
+                        } else {
+                          updateField(i, { type: entry.type, dtoSpecRef: undefined });
+                        }
+                      }}
+                    />
+                  </div>
                   <input
                     type="checkbox"
                     checked={!!f.nullable}
@@ -147,14 +165,6 @@ export const ReturnTypeEditor: React.FC<ReturnTypeEditorProps> = ({
                     onChange={(e) => updateField(i, { nullable: e.target.checked })}
                     style={{ width: 24, height: 16, accentColor: '#0f766e', margin: 0 }}
                   />
-                  <div style={{ width: 70 }}>
-                    <DtoPicker
-                      value={f.dtoSpecRef}
-                      allDtoNotes={allDtoNotes}
-                      onChange={(id) => updateField(i, { dtoSpecRef: id })}
-                      theme="light"
-                    />
-                  </div>
                   <button
                     onClick={() => deleteField(i)}
                     aria-label={`Delete field ${f.name || i}`}
