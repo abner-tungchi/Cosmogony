@@ -81,6 +81,20 @@ interface ReturnTypeSpec {
   fields: ReturnTypeField[];
 }
 
+interface PolicyTrigger {
+  type: 'DomainEvent';
+  name: string;
+  noteRef?: string;
+}
+
+interface PolicyIssue {
+  type: 'Command';
+  name: string;
+  noteRef?: string;
+  targetAggregate?: string;
+  targetAggregateRef?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 interface StickyNote {
   id: string;
@@ -113,6 +127,9 @@ interface StickyNote {
   invariants?: Invariant[];
   // --- Dto-specific (Spec Bundle) ---
   dtoFields?: DtoField[];
+  // --- Policy-specific (Spec Bundle) ---
+  policyTrigger?: PolicyTrigger;
+  policyIssues?: PolicyIssue[];
 }
 
 interface BundleSubNote {
@@ -764,8 +781,20 @@ server.tool(
     phase: z.string().optional().describe('Phase or stage label for this note'),
     notes: z.string().optional().describe('Free-text annotations or remarks'),
     behavior: z.string().optional().describe('(DomainEvent only) Behavior description for this event (e.g. "Delete a product")'),
+    policyTrigger: z.object({
+      type: z.literal('DomainEvent'),
+      name: z.string(),
+      noteRef: z.string().optional(),
+    }).optional().describe('(Policy only) The DomainEvent that triggers this Policy. Setting this field overwrites the trigger entirely; pass undefined to leave unchanged (clearing requires using es_update_note with no policyTrigger to leave it as-is — this MCP tool does not currently support explicit removal).'),
+    policyIssues: z.array(z.object({
+      type: z.literal('Command'),
+      name: z.string(),
+      noteRef: z.string().optional(),
+      targetAggregate: z.string().optional(),
+      targetAggregateRef: z.string().optional(),
+    })).optional().describe('(Policy only) Commands fired by this Policy. Setting this field REPLACES the entire array (not append). Pass [] to clear all issues.'),
   },
-  async ({ id, label, x, y, paths, phase, notes, behavior }) => {
+  async ({ id, label, x, y, paths, phase, notes, behavior, policyTrigger, policyIssues }) => {
     await loadProjectFromRelay();
     const board = getActiveBoard();
     const note = board.notes.find(n => n.id === id);
@@ -777,12 +806,14 @@ server.tool(
     if (phase !== undefined) note.phase = phase;
     if (notes !== undefined) note.notes = notes;
     if (behavior !== undefined && note.type === 'DomainEvent') note.behavior = behavior;
+    if (policyTrigger !== undefined && note.type === 'Policy') note.policyTrigger = policyTrigger;
+    if (policyIssues !== undefined && note.type === 'Policy') note.policyIssues = policyIssues;
     note.updatedAt = new Date().toISOString();
     board.updatedAt = note.updatedAt;
     projectState.updatedAt = note.updatedAt;
     saveProject();
     await syncProjectToRelay();
-    await broadcast('update_note', { id, label, x, y, paths, phase, notes, behavior });
+    await broadcast('update_note', { id, label, x, y, paths, phase, notes, behavior, policyTrigger, policyIssues });
     return { content: [{ type: 'text' as const, text: 'Note updated.' }] };
   }
 );
