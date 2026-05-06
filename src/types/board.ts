@@ -4,6 +4,8 @@ import type {
   DtoField,
   Invariant,
   ReturnTypeSpec,
+  PolicyTrigger,
+  PolicyIssue,
 } from './specs';
 
 export interface Board {
@@ -108,4 +110,8 @@ export interface BoardStore {
   updateRemodelBehavior: (remodelId: string, behavior: string) => void;
   updateRemodelParameters: (remodelId: string, parameters: Property[]) => void;
   updateRemodelReturnType: (remodelId: string, returnType: ReturnTypeSpec) => void;
+
+  // --- Spec Bundle: Policy ---
+  updatePolicyTrigger: (noteId: string, trigger: PolicyTrigger | undefined) => void;
+  updatePolicyIssues: (noteId: string, issues: PolicyIssue[]) => void;
 }

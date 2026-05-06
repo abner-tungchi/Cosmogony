@@ -3,6 +3,8 @@ import type {
   AggregateIdentity,
   DtoField,
   ReturnTypeSpec,
+  PolicyTrigger,
+  PolicyIssue,
 } from './specs';
 
 export type ElementType =
@@ -76,6 +78,10 @@ export interface StickyNote {
 
   // --- Dto-specific ---
   dtoFields?: DtoField[];
+
+  // --- Policy-specific ---
+  policyTrigger?: PolicyTrigger;
+  policyIssues?: PolicyIssue[];
 }
 
 // BundleSubNote kept only for Remodel compatibility

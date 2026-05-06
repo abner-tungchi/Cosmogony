@@ -60,3 +60,30 @@ export interface ReturnTypeSpec {
   shape: 'object' | 'array' | 'primitive';
   fields: ReturnTypeField[];
 }
+
+// ---------- Policy ----------
+
+/**
+ * Describes the DomainEvent that triggers this Policy.
+ * Initial enum: only 'DomainEvent'. May expand later (TimeTrigger / ExternalSystem).
+ * `name` is the user-authored canonical display name.
+ * `noteRef` is an optional graph link to a DomainEvent note on the active board.
+ */
+export interface PolicyTrigger {
+  type: 'DomainEvent';
+  name: string;
+  noteRef?: string;
+}
+
+/**
+ * Describes a Command issued by this Policy.
+ * Initial enum: only 'Command'. `targetAggregate` is the aggregate this command
+ * targets, with optional `targetAggregateRef` graph link.
+ */
+export interface PolicyIssue {
+  type: 'Command';
+  name: string;
+  noteRef?: string;
+  targetAggregate?: string;
+  targetAggregateRef?: string;
+}

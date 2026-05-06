@@ -798,6 +798,38 @@ export const useBoardStore = create<BoardStore>()(
           board.updatedAt = remodel.updatedAt;
           state.project.updatedAt = remodel.updatedAt;
         }),
+
+      // ──────────────────────────────────────────────────────────────
+      // Spec Bundle — Policy
+      // ──────────────────────────────────────────────────────────────
+
+      updatePolicyTrigger: (noteId, trigger) =>
+        set((state) => {
+          const board = findActiveBoard(state);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          if (trigger === undefined) {
+            delete note.policyTrigger;
+          } else {
+            note.policyTrigger = trigger;
+          }
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
+
+      updatePolicyIssues: (noteId, issues) =>
+        set((state) => {
+          const board = findActiveBoard(state);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === noteId);
+          if (!note) return;
+          note.policyIssues = issues;
+          note.updatedAt = new Date().toISOString();
+          board.updatedAt = note.updatedAt;
+          state.project.updatedAt = note.updatedAt;
+        }),
     })),
     {
       name: 'event-storming-board',
