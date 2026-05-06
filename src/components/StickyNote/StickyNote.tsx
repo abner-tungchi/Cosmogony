@@ -6,6 +6,7 @@ import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { PathDots } from '../PathBar/PathDots';
 import { deriveDtoContent } from '../../utils/dtoDerived';
+import { derivePolicyContent } from '../../utils/policyDerived';
 
 // ─── Dto Note Body ────────────────────────────────────────────────────────────
 
@@ -119,6 +120,8 @@ export const StickyNote: React.FC<Props> = ({
   const isAggregate = note.type === 'Aggregate';
   const isEntityAggregateRoot = isEntity && note.isAggregateRoot === true;
   const isInformation = note.type === 'Information';
+  const isPolicy = note.type === 'Policy';
+  const policyDerivedContent = isPolicy ? derivePolicyContent(note, allNotes) : null;
 
   const format: TextFormat = note.textFormat ?? {};
 
@@ -556,6 +559,18 @@ export const StickyNote: React.FC<Props> = ({
             }}
           >
             <span>{entityDisplayLabel || <span style={{ opacity: 0.5 }}>Double-click to edit</span>}</span>
+            {isPolicy && policyDerivedContent && (
+              <div style={{
+                marginTop: 4,
+                fontSize: '10px',
+                lineHeight: 1.5,
+                opacity: 0.75,
+                overflow: 'hidden',
+                whiteSpace: 'pre-line',
+              }}>
+                {policyDerivedContent}
+              </div>
+            )}
             {isDomainEvent && (note.eventProperties ?? []).length > 0 && (
               <div style={{
                 marginTop: 4,

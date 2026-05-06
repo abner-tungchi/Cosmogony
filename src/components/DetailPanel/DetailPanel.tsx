@@ -10,6 +10,7 @@ import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
 import { AggregatePanel } from './AggregatePanel';
 import { DtoPanel } from './DtoPanel';
+import { PolicyPanel } from './PolicyPanel';
 import { ReturnTypeEditor } from './ReturnTypeEditor';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -2289,6 +2290,14 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEnt
             case 'Dto':
               return (
                 <DtoPanel
+                  note={note}
+                  allNotes={activeBoard.notes}
+                  flowPaths={activeBoard.flowPaths}
+                />
+              );
+            case 'Policy':
+              return (
+                <PolicyPanel
                   note={note}
                   allNotes={activeBoard.notes}
                   flowPaths={activeBoard.flowPaths}
