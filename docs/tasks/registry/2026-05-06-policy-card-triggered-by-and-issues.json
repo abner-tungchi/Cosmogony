@@ -1,0 +1,69 @@
+{
+  "id": "2026-05-06-policy-card-triggered-by-and-issues",
+  "file": "docs/tasks/2026-05-06-policy-card-triggered-by-and-issues.md",
+  "title": "Policy card 加 triggeredBy / issues 結構化欄位",
+  "status": "done",
+  "completed": "2026-05-06",
+  "created": "2026-05-06",
+  "depends_on": [],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-06-policy-card-triggered-by-and-issues.md",
+  "preconditions": [
+    "file:src/types/specs.ts",
+    "file:src/types/elements.ts",
+    "file:src/types/board.ts",
+    "file:src/store/boardStore.ts",
+    "file:src/components/DetailPanel/DetailPanel.tsx",
+    "file:src/components/StickyNote/StickyNote.tsx",
+    "file:mcp-server/src/index.ts"
+  ],
+  "verification": [
+    "npx tsc --build",
+    "cd mcp-server && npx tsc --noEmit && cd ..",
+    "npm run build",
+    "grep -q 'export interface PolicyTrigger' src/types/specs.ts",
+    "grep -q 'export interface PolicyIssue' src/types/specs.ts",
+    "grep -q 'policyTrigger?:' src/types/elements.ts",
+    "grep -q 'policyIssues?:' src/types/elements.ts",
+    "grep -q 'updatePolicyTrigger' src/types/board.ts",
+    "grep -q 'updatePolicyIssues' src/types/board.ts",
+    "grep -q 'updatePolicyTrigger:' src/store/boardStore.ts",
+    "grep -q 'updatePolicyIssues:' src/store/boardStore.ts",
+    "test -f src/utils/policyDerived.ts",
+    "test -f src/components/DetailPanel/PolicyPanel.tsx",
+    "grep -q 'export function resolveNoteRefDisplay' src/utils/policyDerived.ts",
+    "grep -q 'export function derivePolicyContent' src/utils/policyDerived.ts",
+    "grep -q 'export const PolicyPanel' src/components/DetailPanel/PolicyPanel.tsx",
+    "grep -q \"case 'Policy'\" src/components/DetailPanel/DetailPanel.tsx",
+    "grep -q 'PolicyPanel' src/components/DetailPanel/DetailPanel.tsx",
+    "grep -q 'derivePolicyContent' src/components/StickyNote/StickyNote.tsx",
+    "grep -q 'PolicyTrigger' mcp-server/src/index.ts",
+    "grep -q 'PolicyIssue' mcp-server/src/index.ts",
+    "grep -q 'policyTrigger' mcp-server/src/index.ts",
+    "grep -q 'policyIssues' mcp-server/src/index.ts",
+    "grep -q 'export interface Policy {' src/types/elements.ts"
+  ],
+  "tags": ["feature", "schema", "ui", "ddd"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-06T15:00:00+08:00",
+      "session": "/discuss R1+R2 三方 agreed (S5 NoteRefPicker 抽不抽 → R2 拍板 inline 不抽); /write-spec 產出"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-06T15:30:00+08:00",
+      "session": "/audit-spec --quick: 4b 5/5 + 5b 7/7 PASS。Spec ~530 行(中等),跳過外部審查理由：所有決策 R1+R2 全 agreed、schema 改動為 optional 加欄位 zero migration、core pattern 沿用既有 dtoSpecRef + Aggregate/Dto Panel 模式。"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-06T15:35:00+08:00",
+      "session": "/pickup auto-mode start; 8 steps direct implementation"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-06T16:00:00+08:00",
+      "session": "All 8 steps complete. 24/24 verification PASS (FE tsc, BE tsc, npm run build, PolicyTrigger/PolicyIssue interfaces, StickyNote 雙欄, BoardStore actions 簽名+實作, policyDerived.ts 4 helpers, PolicyPanel.tsx + inline NoteRefPicker, DetailPanel switch case Policy, StickyNote 顯示衍生內容, BE 鏡像+zod schema, legacy Policy interface 保留). 一個小修正:PolicyTrigger import 未使用已移除。"
+    }
+  ]
+}
