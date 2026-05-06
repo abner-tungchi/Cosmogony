@@ -231,6 +231,19 @@ import `wrapType`,在 onPick 內套同樣 pattern;`updatePropertyTypeAndRef` hel
 - 本 task **不**改 markdown / json export 邏輯
 - 本 task **不**做 cross-language codegen 自動轉換(消費端自行 parse `Wrapper[X]`)
 
+### Sub-menu rendering invariant(2026-05-06 implementation reality)
+
+**Sub-menu MUST be rendered via `createPortal(<submenu />, document.body)`**,理由(從實作 debug 學到):
+
+1. **Position fixed 不保證脫離 ancestor**:若任何祖先有 `transform` / `contain` / `will-change: transform` / `filter` / `backdrop-filter` 任一非 default 值,fixed 元素的 containing block 會被該祖先 hijack,變成 absolute 行為,被 ancestor overflow 切掉。Cosmogony 的 DetailPanel 是 `position: fixed` sidebar、Remodel 卡是 absolute 在 canvas、canvas 自身有 transform — 任何一層觸發 containing block 都會失效。
+2. **Dropdown 的 `overflowY: auto` 隱性 clipX**:CSS spec 明定一軸非 visible 時另一軸 fall back 成 auto。即使 submenu 是 fixed,只要 ancestor 把 fixed 拉成 absolute,submenu 就會被 dropdown 的隱性 X-clip 切掉。
+3. **Portal 是唯一 robust 方案**:`createPortal(submenu, document.body)` 把 DOM 直接掛到 body,完全跳出整個 React vdom tree 的祖先約束。
+4. **副作用**:portal 後 click outside handler 必須額外檢查 `submenuRef.contains(target)`,因為 portal node 不在 containerRef 內。
+
+### `useRef` 賦值反 pattern(2026-05-06 lesson)
+
+**禁止** `someRef.current = new Map()` 在 component body 直接賦值 — 是 render-time side effect,strict mode 雙 render 行為未定。改用 `useMemo(() => new Map(), [...deps])` 或 `useState`。本 picker 的 `optionRegistry` 用 `useMemo` 初始化、每次 render 開頭 `.clear()` 重建。
+
 ---
 
 ## 驗收標準
@@ -291,6 +304,7 @@ git diff HEAD~..HEAD -- mcp-server/src/index.ts | grep -q '^+' && exit 1 || true
 
 ## 已知限制
 
+- **Submenu 必須用 createPortal 到 document.body**:不可只用 `position: fixed` 期望脫離祖先 — 在 Cosmogony 的 DetailPanel(fixed sidebar)/ Remodel 卡(absolute)/ canvas(transform)複合層級中,fixed 仍會被 ancestor containing block 攔截。實作時學到的教訓,已 formalize 進 invariant 段落
 - **不支援嵌套 wrapper**:user 透過 MCP 寫入 `Array[Set[X]]` 仍能存,但 UI 只能顯示外層 wrapper、不能再 wrap 一層;codegen 端自行處理
 - **inner 為 customType 時**:wrapped 顯示 `Array[Email]` 直接套字串,不檢查 Email 是否在 customTypes(視為 free string)
 - **stale ref 同名衝突**:若 user 刪了 OrderDto 又另建一個同名 DTO,dtoSpecRef 仍指向舊 id 視為 stale;UI 顯示 `Array[OrderDto (?)]`,user 重選即可

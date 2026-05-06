@@ -2,7 +2,8 @@
   "id": "2026-05-06-array-container-picker-submenu",
   "file": "docs/tasks/2026-05-06-array-container-picker-submenu.md",
   "title": "TypeOrDtoPicker 加入容器型別子選單(Array / Set / List)",
-  "status": "ready",
+  "status": "done",
+  "completed": "2026-05-06",
   "created": "2026-05-06",
   "depends_on": [],
   "supersedes": null,
@@ -43,6 +44,21 @@
       "status": "ready",
       "at": "2026-05-06T15:30:00+08:00",
       "session": "/audit-spec --quick: 4b 5/5 + 5b 7/7 PASS。跳過外部審查（短 spec ~300 行、R1 全 agreed、純 UI 不動 schema）。"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-06T16:30:00+08:00",
+      "session": "/pickup auto-mode start; 6 steps direct implementation"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-06T17:00:00+08:00",
+      "session": "All 6 steps complete. 15/15 verification PASS (FE tsc, BE tsc, npm run build, ContainerWrapper / wrapType / wrapper? optional, WRAPPER_PATTERN with Array|Set|List, 4 consumers wire wrapType, shared 元件 not coupled to store, ▸ icon present). Trigger label re-applies wrapper over resolved DTO label so display 一致 with canvas."
+    },
+    {
+      "status": "bugfix",
+      "at": "2026-05-06T17:30:00+08:00",
+      "session": "User reported submenu invisible. /discuss R1+R2 三方 agreed: 真正根因是 ancestor containing block trap (Cosmogony fixed DetailPanel + transform canvas) 把 position:fixed 拉成 absolute 並被 dropdown overflowY: auto 隱性 clipX 切掉。修復: createPortal(submenu, document.body) 完全脫離祖先;optionRegistry 改 useMemo + .clear() 避免 useRef body-assign side effect;加 console.debug 診斷打點;click outside 同時檢查 submenuRef。spec 補充 'Sub-menu rendering invariant' 段落形式化教訓。"
     }
   ]
 }
