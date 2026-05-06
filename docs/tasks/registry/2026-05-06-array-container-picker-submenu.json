@@ -1,0 +1,48 @@
+{
+  "id": "2026-05-06-array-container-picker-submenu",
+  "file": "docs/tasks/2026-05-06-array-container-picker-submenu.md",
+  "title": "TypeOrDtoPicker 加入容器型別子選單(Array / Set / List)",
+  "status": "ready",
+  "created": "2026-05-06",
+  "depends_on": [],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-06-array-container-picker-submenu.md",
+  "preconditions": [
+    "file:src/components/shared/TypeOrDtoPicker.tsx",
+    "file:src/utils/dtoDerived.ts",
+    "file:src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "file:src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "file:src/components/Modals/AddCommandModal.tsx",
+    "file:src/components/DetailPanel/DetailPanel.tsx"
+  ],
+  "verification": [
+    "npx tsc --build",
+    "cd mcp-server && npx tsc --noEmit && cd ..",
+    "npm run build",
+    "grep -q 'export type ContainerWrapper' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'export function wrapType' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'wrapper?: ContainerWrapper' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q 'WRAPPER_PATTERN' src/utils/dtoDerived.ts",
+    "grep -q 'Array|Set|List' src/utils/dtoDerived.ts",
+    "grep -q 'wrapType' src/components/DetailPanel/ReturnTypeEditor.tsx",
+    "grep -q 'wrapType' src/components/DetailPanel/DtoFieldsEditor.tsx",
+    "grep -q 'wrapType' src/components/Modals/AddCommandModal.tsx",
+    "grep -q 'wrapType' src/components/DetailPanel/DetailPanel.tsx",
+    "! grep -n 'useBoardStore' src/components/shared/TypeOrDtoPicker.tsx",
+    "! grep -n 'useUIStore' src/components/shared/TypeOrDtoPicker.tsx",
+    "grep -q '▸' src/components/shared/TypeOrDtoPicker.tsx"
+  ],
+  "tags": ["feature", "ux", "ui"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-06T15:00:00+08:00",
+      "session": "/discuss R1 三方 agreed (S1-S7); /write-spec 產出"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-06T15:30:00+08:00",
+      "session": "/audit-spec --quick: 4b 5/5 + 5b 7/7 PASS。跳過外部審查（短 spec ~300 行、R1 全 agreed、純 UI 不動 schema）。"
+    }
+  ]
+}
