@@ -4,7 +4,7 @@ import { useUIStore } from '../../store/uiStore';
 import { useBoardStore } from '../../store/boardStore';
 import { useActiveBoard } from '../../store/selectors';
 import { TypeDropdown } from '../shared/TypeDropdown';
-import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
+import { TypeOrDtoPicker, wrapType } from '../shared/TypeOrDtoPicker';
 import type { StickyNote, FlowPath, Remodel, Property } from '../../types/elements';
 import type { ReturnTypeSpec } from '../../types/specs';
 import { ELEMENT_CONFIGS } from '../../constants/elementTypes';
@@ -168,10 +168,11 @@ const PropertyTable: React.FC<PropertyTableProps> = ({ properties, onChange, ena
                     onAddCustomType={addCustomType}
                     theme="dark"
                     onPick={(entry) => {
+                      const wrapped = wrapType(entry.type, entry.wrapper);
                       if (entry.kind === 'dto') {
-                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: entry.dtoNoteId } : p));
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: wrapped, dtoSpecRef: entry.dtoNoteId } : p));
                       } else {
-                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: undefined } : p));
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: wrapped, dtoSpecRef: undefined } : p));
                       }
                     }}
                   />
@@ -1136,10 +1137,11 @@ const ColoredPropertyTable: React.FC<ColoredPropertyTableProps> = ({
                     onAddCustomType={addCustomType}
                     theme="light"
                     onPick={(entry) => {
+                      const wrapped = wrapType(entry.type, entry.wrapper);
                       if (entry.kind === 'dto') {
-                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: entry.dtoNoteId } : p));
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: wrapped, dtoSpecRef: entry.dtoNoteId } : p));
                       } else {
-                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: entry.type, dtoSpecRef: undefined } : p));
+                        onChange(properties.map((p, idx) => idx === i ? { ...p, type: wrapped, dtoSpecRef: undefined } : p));
                       }
                     }}
                   />

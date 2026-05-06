@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import type { Property } from '../../types/elements';
 import { useBoardStore } from '../../store/boardStore';
 import { useActiveBoard } from '../../store/selectors';
-import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
+import { TypeOrDtoPicker, wrapType } from '../shared/TypeOrDtoPicker';
 
 interface Props {
   isOpen: boolean;
@@ -202,10 +202,11 @@ export const AddCommandModal: React.FC<Props> = ({
                       onAddCustomType={addCustomType}
                       theme="dark"
                       onPick={(entry) => {
+                        const wrapped = wrapType(entry.type, entry.wrapper);
                         if (entry.kind === 'dto') {
-                          updatePropertyTypeAndRef(i, entry.type, entry.dtoNoteId);
+                          updatePropertyTypeAndRef(i, wrapped, entry.dtoNoteId);
                         } else {
-                          updatePropertyTypeAndRef(i, entry.type, undefined);
+                          updatePropertyTypeAndRef(i, wrapped, undefined);
                         }
                       }}
                     />

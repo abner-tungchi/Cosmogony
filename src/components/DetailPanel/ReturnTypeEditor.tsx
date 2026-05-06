@@ -1,7 +1,7 @@
 import React from 'react';
 import type { ReturnTypeField, ReturnTypeSpec } from '../../types/specs';
 import type { StickyNote } from '../../types/elements';
-import { TypeOrDtoPicker } from '../shared/TypeOrDtoPicker';
+import { TypeOrDtoPicker, wrapType } from '../shared/TypeOrDtoPicker';
 import { useBoardStore } from '../../store/boardStore';
 
 interface ReturnTypeEditorProps {
@@ -150,10 +150,11 @@ export const ReturnTypeEditor: React.FC<ReturnTypeEditorProps> = ({
                       onAddCustomType={addCustomType}
                       theme="light"
                       onPick={(entry) => {
+                        const wrapped = wrapType(entry.type, entry.wrapper);
                         if (entry.kind === 'dto') {
-                          updateField(i, { type: entry.type, dtoSpecRef: entry.dtoNoteId });
+                          updateField(i, { type: wrapped, dtoSpecRef: entry.dtoNoteId });
                         } else {
-                          updateField(i, { type: entry.type, dtoSpecRef: undefined });
+                          updateField(i, { type: wrapped, dtoSpecRef: undefined });
                         }
                       }}
                     />
