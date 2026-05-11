@@ -13,7 +13,21 @@ dist-ssr
 *.local
 
 # Runtime data (MCP server persisted state)
-mcp-server/data/
+mcp-server/data/project.json
+mcp-server/data/coach/sessions/
+mcp-server/data/coach/pending/
+mcp-server/data/coach/audit/
+
+# Stray nested runtime dir if mcp-server is run from wrong cwd
+mcp-server/mcp-server/
+
+# TypeScript build artifacts
+mcp-server/tsconfig.tsbuildinfo
+
+# Environment variables (API keys etc.)
+.env
+.env.*
+!.env.example
 
 # Environment variables (API keys etc.)
 .env
