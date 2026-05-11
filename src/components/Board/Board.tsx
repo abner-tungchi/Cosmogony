@@ -11,8 +11,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { BoardCanvas } from './BoardCanvas';
 import { CollapsedChip } from './CollapsedChip';
 import type { GroupBox } from './CollapsedChip';
-import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { Minimap } from './Minimap';
+import { registerAddCommandHandler, registerSetEntityHandler } from '../../utils/modalCallbacks';
 import { AddCommandModal } from '../Modals/AddCommandModal';
 import { SetEntityModal } from '../Modals/SetEntityModal';
 import { useBoardStore } from '../../store/boardStore';
@@ -298,6 +298,14 @@ export const Board: React.FC = () => {
     setAddCommandForEventId(eventNoteId);
   }, []);
 
+  // 註冊 Add Command / Set Entity handlers 到 modalCallbacks registry，
+  // 讓 RightColumn 渲染的 DetailPanel 能透過 registry 觸發 Board.tsx 的 modal state。
+  // P1 妥協：modal state 仍住 Board.tsx；P2/P3 可改 modal 上提到 App.tsx 級。
+  useEffect(() => {
+    registerAddCommandHandler(handleAddCommandForEvent);
+    return () => registerAddCommandHandler(null);
+  }, [handleAddCommandForEvent]);
+
   const handleConfirmAddCommand = useCallback((commandLabel: string, information: Property[]) => {
     if (!addCommandForEventId) return;
     const eventNote = activeBoard.notes.find((n) => n.id === addCommandForEventId);
@@ -319,6 +327,11 @@ export const Board: React.FC = () => {
   const handleSetEntityForEvent = useCallback((eventNoteId: string) => {
     setSetEntityForEventId(eventNoteId);
   }, []);
+
+  useEffect(() => {
+    registerSetEntityHandler(handleSetEntityForEvent);
+    return () => registerSetEntityHandler(null);
+  }, [handleSetEntityForEvent]);
 
   const handleConfirmSetEntity = useCallback((entityLabel: string) => {
     if (!setEntityForEventId) return;
@@ -347,10 +360,6 @@ export const Board: React.FC = () => {
 
   return (
     <>
-    <DetailPanel
-      onAddCommand={handleAddCommandForEvent}
-      onSetEntity={handleSetEntityForEvent}
-    />
     <DndContext
       sensors={sensors}
       onDragStart={handleDragStart}

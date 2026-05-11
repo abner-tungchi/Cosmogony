@@ -5,11 +5,27 @@ import { TabBar } from './components/TabBar/TabBar';
 import { PathBar } from './components/PathBar/PathBar';
 import { Homepage } from './components/Homepage/Homepage';
 import { HintBar } from './components/HintBar/HintBar';
+import { RightColumn } from './components/Coach/RightColumn';
 import { useBoardStore } from './store/boardStore';
 import { useActiveBoard } from './store/selectors';
 import { useUIStore } from './store/uiStore';
 import { useApiSync } from './utils/apiSync';
 import { useReconcileUIState } from './hooks/useReconcileUIState';
+
+const RIGHT_COLUMN_WIDTH_KEY = 'es-right-column-width';
+const LEGACY_DETAIL_PANEL_WIDTH_KEY = 'es-detail-panel-width';
+const RIGHT_COLUMN_DEFAULT_WIDTH = 480;
+
+function readRightColumnWidth(): number {
+  try {
+    const raw = localStorage.getItem(RIGHT_COLUMN_WIDTH_KEY) ?? localStorage.getItem(LEGACY_DETAIL_PANEL_WIDTH_KEY);
+    const n = raw ? parseInt(raw, 10) : NaN;
+    if (Number.isFinite(n)) return n;
+  } catch {
+    // ignore
+  }
+  return RIGHT_COLUMN_DEFAULT_WIDTH;
+}
 
 function App() {
   useApiSync();
@@ -25,6 +41,27 @@ function App() {
     setSelectedElement,
   } = useUIStore();
   const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [rightColumnWidth, setRightColumnWidth] = useState(readRightColumnWidth);
+
+  useEffect(() => {
+    // RightColumn 自身會寫入 localStorage；App.tsx 透過 storage 事件同步 width
+    // 以便中央 fixed 容器的 right offset 即時跟隨。
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === RIGHT_COLUMN_WIDTH_KEY) {
+        setRightColumnWidth(readRightColumnWidth());
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    // 同 tab 內 RightColumn 改 width 後，用 polling 補強（storage 事件不跨同 tab）
+    const id = window.setInterval(() => {
+      const cur = readRightColumnWidth();
+      setRightColumnWidth((prev) => (prev !== cur ? cur : prev));
+    }, 250);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -77,9 +114,9 @@ function App() {
           position: 'fixed',
           top: 0,
           left: sidebarWidth,
-          right: 0,
+          right: rightColumnWidth,
           bottom: 0,
-          transition: 'left 0.2s ease',
+          transition: 'left 0.2s ease, right 0.2s ease',
         }}
       >
         <TabBar />
@@ -102,6 +139,7 @@ function App() {
           )}
         </div>
       </div>
+      <RightColumn />
     </div>
   );
 }
