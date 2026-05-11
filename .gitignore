@@ -15,6 +15,11 @@ dist-ssr
 # Runtime data (MCP server persisted state)
 mcp-server/data/
 
+# Environment variables (API keys etc.)
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
