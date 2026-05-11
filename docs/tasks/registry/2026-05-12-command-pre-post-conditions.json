@@ -1,0 +1,93 @@
+{
+  "id": "2026-05-12-command-pre-post-conditions",
+  "file": "docs/tasks/2026-05-12-command-pre-post-conditions.md",
+  "title": "Command preCondition / postCondition 欄位設計",
+  "status": "done",
+  "completed": "2026-05-12",
+  "created": "2026-05-12",
+  "depends_on": ["2026-05-11-coach-agent-spec-b-mvp-mid"],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-12-command-pre-post-conditions.md",
+  "preconditions": [
+    "file:src/types/elements.ts",
+    "file:src/types/bundle.ts",
+    "file:src/store/boardStore.ts",
+    "file:src/utils/markdownExporter.ts",
+    "file:src/utils/aiPromptBuilder.ts",
+    "file:src/utils/jsonExporter.ts",
+    "file:src/components/DetailPanel/DetailPanel.tsx",
+    "file:mcp-server/src/coach/types.ts",
+    "file:mcp-server/src/coach/tools/handlers.ts",
+    "file:mcp-server/src/coach/tools/toolDefinitions.ts",
+    "file:mcp-server/src/coach/agent/pendingActions.ts",
+    "file:mcp-server/src/coach/skills/eventStormingSkill.ts"
+  ],
+  "verification": [
+    "cd mcp-server && npx tsc --noEmit",
+    "npx tsc -b",
+    "test -f src/components/DetailPanel/CommandConditionEditor.tsx",
+    "grep -q 'export interface CommandCondition' src/types/elements.ts",
+    "grep -q 'preConditions?: CommandCondition\\[\\]' src/types/elements.ts",
+    "grep -q 'postConditions?: CommandCondition\\[\\]' src/types/elements.ts",
+    "grep -q 'preconditions: SpecCondition\\[\\]' src/types/bundle.ts",
+    "grep -q 'postconditions: SpecCondition\\[\\]' src/types/bundle.ts",
+    "grep -q 'export interface SpecCondition' src/types/bundle.ts",
+    "grep -q 'version: 17' src/store/boardStore.ts",
+    "grep -q 'if (version < 17)' src/store/boardStore.ts",
+    "grep -q 'addCommandCondition' src/store/boardStore.ts",
+    "grep -q 'updateCommandConditions' src/store/boardStore.ts",
+    "grep -q 'deleteCommandCondition' src/store/boardStore.ts",
+    "grep -q '_brokenInvariantLink' src/store/boardStore.ts",
+    "grep -q 'handle_es_add_command_condition' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'handle_es_update_command_conditions' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q \"name: 'es_add_command_condition'\" mcp-server/src/coach/tools/toolDefinitions.ts",
+    "grep -q \"name: 'es_update_command_conditions'\" mcp-server/src/coach/tools/toolDefinitions.ts",
+    "grep -q 'Command note .* not found' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'is not a Command (type:' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'postCondition must not carry invariantId' mcp-server/src/coach/tools/handlers.ts",
+    "grep -qE 'export interface (StickyNote|CommandCondition)' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'addCommandCondition' src/types/board.ts",
+    "grep -q 'updateCommandConditions' src/types/board.ts",
+    "grep -q 'deleteCommandCondition' src/types/board.ts",
+    "grep -qE 'preconditions|postconditions' src/utils/jsonExporter.ts",
+    "grep -q '_brokenInvariantLink' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'preConditions: note.preConditions' mcp-server/src/coach/agent/pendingActions.ts",
+    "grep -q 'postConditions: note.postConditions' mcp-server/src/coach/agent/pendingActions.ts",
+    "grep -q \"case 'es_add_command_condition'\" mcp-server/src/coach/skills/eventStormingSkill.ts",
+    "grep -q 'Preconditions' src/utils/markdownExporter.ts",
+    "grep -q 'Postconditions' src/utils/markdownExporter.ts",
+    "grep -q 'preconditions' src/utils/jsonExporter.ts",
+    "grep -q 'postconditions' src/utils/jsonExporter.ts",
+    "grep -q '前置狀態' src/components/DetailPanel/DetailPanel.tsx",
+    "grep -q '執行後狀態' src/components/DetailPanel/DetailPanel.tsx",
+    "cd mcp-server && npx vitest run --reporter=default"
+  ],
+  "tags": ["feature", "ui", "ddd", "schema", "coach"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-12T10:00:00+08:00",
+      "session": "/write-spec from 4-round Magi discussion (D1-D13, 5 OQ)；Codex 2/4 輪解析失敗 / Gemini 3/4 輪缺席 — D6 split-pair pattern by Gemini+Claude majority (2-1)，Codex 異議 (single mutate tool) 記入 ADR 與「已知限制」段，附 dogfood ≥30% rewrite 退回判準"
+    },
+    {
+      "status": "draft",
+      "at": "2026-05-12T10:30:00+08:00",
+      "session": "內部 4b/5b 自審通過：Rule 1 line anchor 4 處改為語意錨點 / Rule 2 code samples 對照 handlers.ts / Rule 4 目標 vs Non-goals 互斥 / Rule 5 Agent / Human verification 分段。"
+    },
+    {
+      "status": "ready",
+      "at": "2026-05-12T11:30:00+08:00",
+      "session": "/audit-spec 外部審查 by codex:rescue → 抓出 6 HIGH + 4 MED + 3 LOW，全部已修進 spec（spec 從 763 → 879 行，加 44 處 `audit HIGH/MED/LOW` 標記）。Codex session: 019e177b-eef0-7721-9c76-e7caafdf4025"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-12T12:00:00+08:00",
+      "session": "/pickup 啟動實作；5 個 step（FE types/migration/actions → BE handlers/cascade → Coach Skill/CAS → FE UI → Export 整合）；Codex 實作 → Gemini 驗證 → Claude 協調"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-12T14:30:00+08:00",
+      "session": "5 step 全部完成 → Gemini full review (cc-gemini-plugin) → 找出 1 HIGH (FE test infra 缺失 — 已文件化) + 2 MED + 2 LOW，4 個 actionable 全修：\n\n**已修進 code（gemini-review-fix）**：\n- MED-1 Cascade scope all-boards：FE boardStore.deleteInvariant + BE handle_es_delete_invariant 都改為 scan ALL boards（不只 active board），避免跨 board invariantId reference dangle\n- MED-2 stableSubset 補 `information` + `behavior` 欄位：CAS hash 現在 cover Command input schema 改動 + DomainEvent behavior text 改動，不只 conditions\n- LOW-1 markdownExporter Hoare 順序：Preconditions → Parameters → Postconditions（修正前 Parameters → Pre → Post）\n- LOW-2 UseCaseSpec field 順序：preconditions → input → postconditions（修正前 input → pre → post）；bundle.ts + jsonExporter.ts 同步\n\n**Known limitation（HIGH-1 — gemini 觀察）**：\n- FE 沒有 vitest config（root package.json 無 'test' script）→ v17 migration + addCommandCondition / updateCommandConditions / deleteCommandCondition + deleteInvariant cascade 的 FE 測試只能手動跑 Demo 1-3 驗證。BE 側 217 個 tests 都有 cover handler-side 等價 logic（Command init paths、cascade、condition CRUD），所以雖然 FE 是 'hope-verified'，BE coverage 良好。若未來要補 FE test，需 setup vitest at root + 寫 boardStore.test.ts；推 Spec C cleanup 或 separate infra task。\n\n**Final 驗證**：\n- BE tsc + FE tsc 都 clean\n- 217/217 BE vitest pass\n- 34/34 registry verification grep checks pass\n- Spec compliance 12/13（Gemini 12 checks PASS，HIGH-1 缺 FE test 為 doc'd limitation）\n\n實作摘要：\n- Step 0 FE types + migration + 3 store actions + addNote/addCommandForEvent init + deleteInvariant cascade（Codex bridged jsonExporter partial mapping for tsc 綠 + 改 v15→v16 fall-through 讓 v14-以下 user 一次到 v17）\n- Step 1 BE 2 個新 handler + StickyNote ext + CommandCondition export + add_note/add_command_for_event init + delete_invariant cascade（+14 tests + eventStormingSkill.test.ts tool count 12→13 同步）\n- Step 2 stableSubset 加 conditions + describeProposal 新 case（+4 tests）\n- Step 3 CommandConditionEditor.tsx + DetailPanel CollapsibleSection + Pre/Post 圍 Information\n- Step 4 markdownExporter Pre/Post bullets + jsonExporter pruneEmpty keepKeys + invariantSpecId\n- Step 5 gemini review + 4 fixes\n\nGemini session: cc-gemini-plugin yolo, gemini-2.5-pro。\nCodex audit session: 019e177b-eef0-7721-9c76-e7caafdf4025（spec audit 階段）。"
+    }
+  ]
+}
