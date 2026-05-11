@@ -15,6 +15,7 @@ const EXPECTED_ADDITIVE_TOOLS = [
   'es_add_link',
   'es_add_entity_for_event',
   'es_add_invariant',
+  'es_add_command_condition',
 ];
 
 function buildProject(): Project {
@@ -63,10 +64,10 @@ function ctxFor(project: Project): ToolHandlerCtx {
 }
 
 describe('EventStormingSkill.buildDeclarations', () => {
-  it('exports exactly 12 tools (3 read + 9 additive)', () => {
+  it('exports exactly 13 tools (3 read + 10 additive)', () => {
     const skill = new EventStormingSkill();
     const decls = skill.buildDeclarations();
-    expect(decls).toHaveLength(12);
+    expect(decls).toHaveLength(13);
     const names = decls.map((d) => d.name).sort();
     const expected = [...EXPECTED_READ_TOOLS, ...EXPECTED_ADDITIVE_TOOLS].sort();
     expect(names).toEqual(expected);
@@ -192,5 +193,98 @@ describe('EventStormingSkill.describeProposal', () => {
       ctxFor(project),
     );
     expect(desc.targetIds).toEqual([]);
+  });
+
+  it('describeProposal es_add_command_condition returns targetIds=[commandNoteId] and Chinese subjectLabel', () => {
+    const skill = new EventStormingSkill();
+    const project = {
+      id: 'p',
+      name: 'Test',
+      activeBoardId: 'b-1',
+      boards: [
+        {
+          id: 'b-1',
+          name: 'Test',
+          notes: [
+            {
+              id: 'cmd-1',
+              type: 'Command',
+              label: 'PlaceOrder',
+              position: { x: 0, y: 0 },
+              size: { width: 160, height: 80 },
+              zIndex: 1,
+              createdAt: '2026-05-12T00:00:00Z',
+              updatedAt: '2026-05-12T00:00:00Z',
+            },
+          ],
+          remodels: [],
+          links: [],
+          flowPaths: [],
+          createdAt: '2026-05-12T00:00:00Z',
+          updatedAt: '2026-05-12T00:00:00Z',
+        },
+      ],
+      createdAt: '2026-05-12T00:00:00Z',
+      updatedAt: '2026-05-12T00:00:00Z',
+    };
+    const ctx = { projectState: project as any, now: () => '2026-05-12T00:00:00Z' };
+    const desc = skill.describeProposal(
+      'es_add_command_condition',
+      {
+        commandNoteId: 'cmd-1',
+        kind: 'pre',
+        condition: { text: '顧客信用額度 ≥ 訂單金額' },
+      },
+      ctx,
+    );
+    expect(desc.targetIds).toEqual(['cmd-1']);
+    expect(desc.subjectLabel).toContain('前置狀態');
+    expect(desc.humanSummary).toContain('PlaceOrder');
+    expect(desc.humanSummary).toContain('顧客信用額度');
+  });
+
+  it('describeProposal es_add_command_condition kind=post uses 執行後狀態 label', () => {
+    const skill = new EventStormingSkill();
+    const project = {
+      id: 'p',
+      name: 'Test',
+      activeBoardId: 'b-1',
+      boards: [
+        {
+          id: 'b-1',
+          name: 'Test',
+          notes: [
+            {
+              id: 'cmd-1',
+              type: 'Command',
+              label: 'PlaceOrder',
+              position: { x: 0, y: 0 },
+              size: { width: 160, height: 80 },
+              zIndex: 1,
+              createdAt: '2026-05-12T00:00:00Z',
+              updatedAt: '2026-05-12T00:00:00Z',
+            },
+          ],
+          remodels: [],
+          links: [],
+          flowPaths: [],
+          createdAt: '2026-05-12T00:00:00Z',
+          updatedAt: '2026-05-12T00:00:00Z',
+        },
+      ],
+      createdAt: '2026-05-12T00:00:00Z',
+      updatedAt: '2026-05-12T00:00:00Z',
+    };
+    const ctx = { projectState: project as any, now: () => '2026-05-12T00:00:00Z' };
+    const desc = skill.describeProposal(
+      'es_add_command_condition',
+      {
+        commandNoteId: 'cmd-1',
+        kind: 'post',
+        condition: { text: '訂單已建立' },
+      },
+      ctx,
+    );
+    expect(desc.subjectLabel).toContain('執行後狀態');
   });
 });

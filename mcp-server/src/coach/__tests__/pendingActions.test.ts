@@ -111,6 +111,88 @@ describe('computeTargetEntityHash', () => {
     // No way to set position/zIndex in ProjectSnapshot type — by construction.
     expect(computeTargetEntityHash(a, ['n1'])).toBe(computeTargetEntityHash(b, ['n1']));
   });
+
+  it('hash changes when preConditions array on target Command mutates (Spec v17 CAS reverify)', () => {
+    const baseProject: ProjectSnapshot = {
+      id: 'p',
+      activeBoardId: 'b',
+      updatedAt: '2026-05-12T00:00:00Z',
+      boards: [
+        {
+          id: 'b',
+          notes: [
+            {
+              id: 'cmd-1',
+              type: 'Command',
+              label: 'PlaceOrder',
+              preConditions: [],
+              postConditions: [],
+            },
+          ],
+          remodels: [],
+        },
+      ],
+    };
+    const hash1 = computeTargetEntityHash(baseProject, ['cmd-1']);
+
+    // mutate preConditions array (add one)
+    baseProject.boards[0].notes[0].preConditions = [{ id: 'pre-1', text: 'rule' }];
+    const hash2 = computeTargetEntityHash(baseProject, ['cmd-1']);
+    expect(hash2).not.toBe(hash1);
+
+    // reorder also changes hash
+    baseProject.boards[0].notes[0].preConditions = [
+      { id: 'pre-1', text: 'rule' },
+      { id: 'pre-2', text: 'rule2' },
+    ];
+    const hash3 = computeTargetEntityHash(baseProject, ['cmd-1']);
+    const reordered: ProjectSnapshot = {
+      ...baseProject,
+      boards: [
+        {
+          ...baseProject.boards[0],
+          notes: [
+            {
+              ...baseProject.boards[0].notes[0],
+              preConditions: [
+                { id: 'pre-2', text: 'rule2' },
+                { id: 'pre-1', text: 'rule' },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const hash4 = computeTargetEntityHash(reordered, ['cmd-1']);
+    expect(hash4).not.toBe(hash3);
+  });
+
+  it('hash changes when postConditions array on target Command mutates', () => {
+    const project: ProjectSnapshot = {
+      id: 'p',
+      activeBoardId: 'b',
+      updatedAt: '2026-05-12T00:00:00Z',
+      boards: [
+        {
+          id: 'b',
+          notes: [
+            {
+              id: 'cmd-1',
+              type: 'Command',
+              label: 'PlaceOrder',
+              preConditions: [],
+              postConditions: [],
+            },
+          ],
+          remodels: [],
+        },
+      ],
+    };
+    const before = computeTargetEntityHash(project, ['cmd-1']);
+    project.boards[0].notes[0].postConditions = [{ id: 'post-1', text: 'created' }];
+    const after = computeTargetEntityHash(project, ['cmd-1']);
+    expect(after).not.toBe(before);
+  });
 });
 
 describe('ACTION_UPDATE_SSE_CHANNEL', () => {

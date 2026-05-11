@@ -1,4 +1,4 @@
-import type { StickyNote, Link, FlowPath, Remodel, Property } from './elements';
+import type { StickyNote, Link, FlowPath, Remodel, Property, CommandCondition } from './elements';
 import type {
   AggregateIdentity,
   DtoField,
@@ -79,6 +79,11 @@ export interface BoardStore {
   setEntityAsAggregateRoot: (entityNoteId: string) => void;
   unsetEntityAsAggregateRoot: (aggregateNoteId: string) => void;
   linkEventToAggregate: (eventId: string, aggregateNoteId: string) => void;
+
+  // Command condition actions (audit Spec)
+  addCommandCondition: (commandNoteId: string, kind: 'pre' | 'post', condition: Omit<CommandCondition, 'id'> & { id?: string }) => void;
+  updateCommandConditions: (commandNoteId: string, preConditions?: CommandCondition[], postConditions?: CommandCondition[]) => void;
+  deleteCommandCondition: (commandNoteId: string, kind: 'pre' | 'post', conditionId: string) => void;
 
   // Remodel management (active board)
   addRemodel: (remodel: Remodel) => void;

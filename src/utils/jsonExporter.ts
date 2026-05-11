@@ -251,6 +251,15 @@ export const buildUseCaseSpec = (
 
   const specLinks = buildSpecLinks(domainEvent.id, links, notesById, remodelsById);
 
+  // Step 4: surface Command pre/post conditions in UseCaseSpec. For dogfood
+  // scope, `invariantSpecId` is the runtime invariantId (preconditions only —
+  // SpecCondition.invariantSpecId doesn't apply on post-side).
+  const preconditions = (commandNote?.preConditions ?? []).map((c) => ({
+    text: c.text,
+    ...(c.invariantId ? { invariantSpecId: c.invariantId } : {}),
+  }));
+  const postconditions = (commandNote?.postConditions ?? []).map((c) => ({ text: c.text }));
+
   const spec: UseCaseSpec = {
     kind: 'UseCaseSpec',
     useCaseSpecId: domainEvent.id,
@@ -259,7 +268,10 @@ export const buildUseCaseSpec = (
     behavior: domainEvent.behavior,
     aggregate: aggregateLabel,
     paths,
+    // Hoare triple {P} c {Q} ordering (gemini-review-fix)
+    preconditions,
     input,
+    postconditions,
     emittedEvent: eventLabel,
     eventPayload,
     links: specLinks,
@@ -272,7 +284,7 @@ export const buildUseCaseSpec = (
     _suggested_repository: aggregateLabel ? `${aggregateLabel}Repository` : undefined,
   };
 
-  return pruneEmpty(spec, ['input', 'eventPayload']);
+  return pruneEmpty(spec, ['input', 'eventPayload', 'preconditions', 'postconditions']);
 };
 
 // =============================================================================

@@ -3,7 +3,7 @@ import { persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 import { v4 as uuidv4 } from 'uuid';
 import type { Board, Project, BoardStore, UIState } from '../types/board';
-import type { StickyNote, Link, FlowPath, Remodel } from '../types/elements';
+import type { StickyNote, Link, FlowPath, Remodel, CommandCondition } from '../types/elements';
 import { useUIStore } from './uiStore';
 
 // Per-tab UI state (activeBoardId / openBoardIds) lives in uiStore so each
@@ -184,6 +184,11 @@ export const useBoardStore = create<BoardStore>()(
         set((state) => {
           const board = findActiveBoard(state);
           if (board) {
+            // audit HIGH-1: Command creation paths must initialize condition arrays
+            if (note.type === 'Command') {
+              if (note.preConditions === undefined) note.preConditions = [];
+              if (note.postConditions === undefined) note.postConditions = [];
+            }
             board.notes.push(note);
             board.updatedAt = new Date().toISOString();
             state.project.updatedAt = board.updatedAt;
@@ -317,6 +322,8 @@ export const useBoardStore = create<BoardStore>()(
             size: { width: 160, height: 80 },
             zIndex: eventNote.zIndex,
             information,
+            preConditions: [],
+            postConditions: [],
             groupEventId: eventNoteId,
             createdAt: now,
             updatedAt: now,
@@ -367,6 +374,55 @@ export const useBoardStore = create<BoardStore>()(
             existingEntity.updatedAt = now;
           }
 
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      addCommandCondition: (commandNoteId, kind, condition) =>
+        set((state) => {
+          const board = findActiveBoard(state);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === commandNoteId);
+          if (!note || note.type !== 'Command') return;
+          const newCondition: CommandCondition = {
+            ...condition,
+            id: condition.id ?? uuidv4(),
+          };
+          const arrayKey: 'preConditions' | 'postConditions' = kind === 'pre' ? 'preConditions' : 'postConditions';
+          if (!note[arrayKey]) note[arrayKey] = [];
+          note[arrayKey]!.push(newCondition);
+          const now = new Date().toISOString();
+          note.updatedAt = now;
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      updateCommandConditions: (commandNoteId, preConditions, postConditions) =>
+        set((state) => {
+          const board = findActiveBoard(state);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === commandNoteId);
+          if (!note || note.type !== 'Command') return;
+          if (preConditions !== undefined) note.preConditions = preConditions;
+          if (postConditions !== undefined) note.postConditions = postConditions;
+          const now = new Date().toISOString();
+          note.updatedAt = now;
+          board.updatedAt = now;
+          state.project.updatedAt = now;
+        }),
+
+      deleteCommandCondition: (commandNoteId, kind, conditionId) =>
+        set((state) => {
+          const board = findActiveBoard(state);
+          if (!board) return;
+          const note = board.notes.find((n: StickyNote) => n.id === commandNoteId);
+          if (!note || note.type !== 'Command') return;
+          const arrayKey: 'preConditions' | 'postConditions' = kind === 'pre' ? 'preConditions' : 'postConditions';
+          const arr = note[arrayKey];
+          if (!arr) return;
+          note[arrayKey] = arr.filter((c) => c.id !== conditionId);
+          const now = new Date().toISOString();
+          note.updatedAt = now;
           board.updatedAt = now;
           state.project.updatedAt = now;
         }),
@@ -694,9 +750,30 @@ export const useBoardStore = create<BoardStore>()(
           const note = board.notes.find((n: StickyNote) => n.id === noteId);
           if (!note || !note.invariants) return;
           note.invariants = note.invariants.filter((i) => i.id !== invariantId);
-          note.updatedAt = new Date().toISOString();
-          board.updatedAt = note.updatedAt;
-          state.project.updatedAt = note.updatedAt;
+          const now = new Date().toISOString();
+          note.updatedAt = now;
+          board.updatedAt = now;
+
+          // audit HIGH-2 / D7 cascade (gemini-review-fix: scan ALL boards, not just active)
+          // soft-null + flag any preCondition referencing the deleted invariantId
+          for (const b of state.project.boards) {
+            for (const cmdNote of b.notes) {
+              if (cmdNote.type !== 'Command' || !cmdNote.preConditions) continue;
+              let changed = false;
+              for (const pre of cmdNote.preConditions) {
+                if (pre.invariantId === invariantId) {
+                  pre._brokenInvariantLink = { previousId: invariantId, deletedAt: now };
+                  pre.invariantId = undefined;
+                  changed = true;
+                }
+              }
+              if (changed) {
+                cmdNote.updatedAt = now;
+                b.updatedAt = now;
+              }
+            }
+          }
+          state.project.updatedAt = now;
         }),
 
       approveInvariant: (noteId, invariantId) =>
@@ -833,7 +910,7 @@ export const useBoardStore = create<BoardStore>()(
     })),
     {
       name: 'event-storming-board',
-      version: 16,
+      version: 17,
       migrate: (persistedState: unknown, version: number) => {
         const now = new Date().toISOString();
 
@@ -1213,7 +1290,22 @@ export const useBoardStore = create<BoardStore>()(
             delete s.project.activeBoardId;
             delete s.project.openBoardIds;
           }
-          return persistedState as BoardStore;
+          // Fall through to v16 → v17 so v15-or-lower users reach v17 in one rehydrate.
+        }
+
+        if (version < 17) {
+          // v16 → v17: Add preConditions / postConditions arrays to Command notes.
+          // Pure additive — default []. Other note types remain undefined.
+          const state = persistedState as { project?: { boards?: Array<{ notes?: StickyNote[] }> } };
+          const boards = state.project?.boards ?? [];
+          for (const board of boards) {
+            for (const note of board.notes ?? []) {
+              if (note.type === 'Command') {
+                if (note.preConditions === undefined) (note as StickyNote).preConditions = [];
+                if (note.postConditions === undefined) (note as StickyNote).postConditions = [];
+              }
+            }
+          }
         }
 
         return persistedState as BoardStore;

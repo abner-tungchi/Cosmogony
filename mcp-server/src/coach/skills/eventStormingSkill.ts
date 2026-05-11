@@ -99,6 +99,18 @@ export class EventStormingSkill implements Skill {
         humanSummary = `在 aggregate "${aggLabel}" 加 invariant "${invTitle}"`;
         break;
       }
+      case 'es_add_command_condition': {
+        const cmdId = typeof a.commandNoteId === 'string' ? a.commandNoteId : '';
+        targetIds = cmdId ? [cmdId] : [];
+        const cmdLabel = findLabel(cmdId) ?? cmdId;
+        const cond = (a.condition ?? {}) as Record<string, unknown>;
+        const kindLabel = a.kind === 'pre' ? '前置狀態' : '執行後狀態';
+        const text = String(cond.text ?? '(unnamed condition)');
+        const shortText = text.length > 40 ? text.slice(0, 40) + '...' : text;
+        subjectLabel = `${kindLabel} "${shortText}"`;
+        humanSummary = `在 Command "${cmdLabel}" 加 ${kindLabel}：${text}`;
+        break;
+      }
       case 'es_add_link': {
         const fromId = typeof a.fromId === 'string' ? a.fromId : '';
         const toId = typeof a.toId === 'string' ? a.toId : '';

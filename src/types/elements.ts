@@ -44,6 +44,20 @@ export interface Property {
   dtoSpecRef?: string;
 }
 
+/**
+ * 一條 Command 的 pre/post condition。dogfood 階段以自然語言文字為主；
+ * preCondition 可選擇連結 Aggregate invariant 做 traceability。
+ */
+export interface CommandCondition {
+  id: string;                 // 穩定 uuid，給 diff / cross-ref 用
+  text: string;               // 自然語言描述（中英文皆可）
+  invariantId?: string;       // 只 pre 用 — 連結同 board 上的 Aggregate invariant id
+  _brokenInvariantLink?: {    // soft-null：cascade delete 時保留歷史軌跡
+    previousId: string;
+    deletedAt: string;        // ISO8601
+  };
+}
+
 export interface StickyNote {
   id: string;
   type: ElementType;
@@ -82,6 +96,10 @@ export interface StickyNote {
   // --- Policy-specific ---
   policyTrigger?: PolicyTrigger;
   policyIssues?: PolicyIssue[];
+
+  // --- Command-specific ---
+  preConditions?: CommandCondition[];
+  postConditions?: CommandCondition[];
 }
 
 // BundleSubNote kept only for Remodel compatibility

@@ -12,6 +12,7 @@ import { AggregatePanel } from './AggregatePanel';
 import { DtoPanel } from './DtoPanel';
 import { PolicyPanel } from './PolicyPanel';
 import { ReturnTypeEditor } from './ReturnTypeEditor';
+import { CommandConditionEditor, collectAggregateInvariants } from './CommandConditionEditor';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 //
@@ -43,6 +44,52 @@ const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     {children}
   </div>
 );
+
+interface CollapsibleSectionProps {
+  label: string;
+  defaultOpen: boolean;
+  help?: string;
+  children: React.ReactNode;
+}
+
+const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({ label, defaultOpen, help, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          padding: '2px 0',
+          cursor: 'pointer',
+          color: TEXT_MUTED,
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}
+      >
+        <span>{open ? '▾' : '▸'}</span>
+        <span>{label}</span>
+        {help && (
+          <span
+            title={help}
+            style={{ marginLeft: 'auto', color: TEXT_MUTED, fontSize: 12, cursor: 'help' }}
+          >
+            ?
+          </span>
+        )}
+      </button>
+      {open && <div style={{ marginTop: 6 }}>{children}</div>}
+    </div>
+  );
+};
 
 interface InlineFieldProps {
   label: string;
@@ -307,7 +354,7 @@ interface GroupPanelProps {
 }
 
 const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAddCommand, onSetEntity }) => {
-  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent, linkEventToAggregate, setEntityAsAggregateRoot, unsetEntityAsAggregateRoot } = useBoardStore();
+  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent, linkEventToAggregate, setEntityAsAggregateRoot, unsetEntityAsAggregateRoot, updateCommandConditions } = useBoardStore();
 
   const linkedCommand = note.commandId ? allNotes.find((n) => n.id === note.commandId) : undefined;
   const linkedEntityOrAggregate = note.entityId ? allNotes.find((n) => n.id === note.entityId) : undefined;
@@ -688,6 +735,22 @@ const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAd
         )}
       </div>
 
+      {/* PRE-CONDITIONS (Spec v17, Hoare {P}) */}
+      {linkedCommand && (
+        <CollapsibleSection
+          label="前置狀態（Pre-conditions）"
+          defaultOpen={(linkedCommand.preConditions?.length ?? 0) > 0}
+          help="本 Command 接受前必須滿足的狀態；可選擇連結到 Aggregate invariant"
+        >
+          <CommandConditionEditor
+            conditions={linkedCommand.preConditions ?? []}
+            allAggregateInvariants={collectAggregateInvariants(allNotes)}
+            kind="pre"
+            onChange={(next) => updateCommandConditions(linkedCommand.id, next, undefined)}
+          />
+        </CollapsibleSection>
+      )}
+
       {/* INFORMATION */}
       <div style={{ marginBottom: 16 }}>
         <SectionLabel>Information (Command Input)</SectionLabel>
@@ -707,6 +770,22 @@ const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAd
           </div>
         )}
       </div>
+
+      {/* POST-CONDITIONS (Spec v17, Hoare {Q}) */}
+      {linkedCommand && (
+        <CollapsibleSection
+          label="執行後狀態（Post-conditions）"
+          defaultOpen={(linkedCommand.postConditions?.length ?? 0) > 0}
+          help="本 Command 成功執行後，必須斷言的狀態變化（不同於『產生的 events』）"
+        >
+          <CommandConditionEditor
+            conditions={linkedCommand.postConditions ?? []}
+            allAggregateInvariants={[]}
+            kind="post"
+            onChange={(next) => updateCommandConditions(linkedCommand.id, undefined, next)}
+          />
+        </CollapsibleSection>
+      )}
 
       {divider}
 

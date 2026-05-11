@@ -94,6 +94,21 @@ export interface PolicyIssue {
   targetAggregateRef?: string;
 }
 
+/**
+ * Command pre/post condition (Spec v17). Pre may reference an Aggregate
+ * invariant via invariantId. _brokenInvariantLink is a soft-null marker
+ * set by cascade when the referenced invariant is deleted.
+ */
+export interface CommandCondition {
+  id: string;
+  text: string;
+  invariantId?: string;
+  _brokenInvariantLink?: {
+    previousId: string;
+    deletedAt: string;
+  };
+}
+
 export interface StickyNote {
   id: string;
   type: ElementType;
@@ -123,6 +138,9 @@ export interface StickyNote {
   dtoFields?: DtoField[];
   policyTrigger?: PolicyTrigger;
   policyIssues?: PolicyIssue[];
+  // --- Command-specific (Spec v17) ---
+  preConditions?: CommandCondition[];
+  postConditions?: CommandCondition[];
 }
 
 export interface BundleSubNote {
@@ -457,6 +475,8 @@ export const handle_es_add_note: ToolHandler<EsAddNoteArgs> = (args, ctx) => {
     phase: args.phase,
     notes: args.notes,
     ...(args.type === 'DomainEvent' && args.behavior !== undefined ? { behavior: args.behavior } : {}),
+    // audit HIGH-1: Command creation paths must initialize condition arrays
+    ...(args.type === 'Command' ? { preConditions: [], postConditions: [] } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -597,6 +617,8 @@ export const handle_es_add_command_for_event: ToolHandler<EsAddCommandForEventAr
     paths: eventNote.paths ?? [],
     phase: eventNote.phase,
     information: information ?? [],
+    preConditions: [],
+    postConditions: [],
     groupEventId: eventNoteId,
     createdAt: now,
     updatedAt: now,
@@ -1650,6 +1672,33 @@ export const handle_es_delete_invariant: ToolHandler<EsDeleteInvariantArgs> = (
   note.updatedAt = now;
   board.updatedAt = now;
   ctx.projectState.updatedAt = now;
+
+  // audit HIGH-2 / D7 cascade (gemini-review-fix: scan ALL boards)
+  // soft-null + flag any preCondition referencing the deleted invariantId
+  const cascadeEvents: BroadcastEvent[] = [];
+  for (const b of ctx.projectState.boards) {
+    for (const cmdNote of b.notes) {
+      if (cmdNote.type !== 'Command' || !cmdNote.preConditions) continue;
+      let changed = false;
+      for (const pre of cmdNote.preConditions) {
+        if (pre.invariantId === invariantId) {
+          pre._brokenInvariantLink = { previousId: invariantId, deletedAt: now };
+          pre.invariantId = undefined;
+          changed = true;
+        }
+      }
+      if (changed) {
+        cmdNote.updatedAt = now;
+        b.updatedAt = now;
+        cascadeEvents.push({
+          phase: 'post-commit',
+          action: 'update_note',
+          payload: { id: cmdNote.id, preConditions: cmdNote.preConditions },
+        });
+      }
+    }
+  }
+
   return {
     ok: true,
     resultJson: { success: true, deletedId: invariantId },
@@ -1659,6 +1708,7 @@ export const handle_es_delete_invariant: ToolHandler<EsDeleteInvariantArgs> = (
         action: 'update_note',
         payload: { id: noteId, invariants: note.invariants },
       },
+      ...cascadeEvents,
     ],
   };
 };
@@ -1727,6 +1777,155 @@ export const handle_es_set_invariant_status: ToolHandler<EsSetInvariantStatusArg
         phase: 'post-commit',
         action: 'update_note',
         payload: { id: noteId, invariants: note.invariants },
+      },
+    ],
+  };
+};
+
+// ─── Handlers — Command Conditions (Spec v17) ─────────────────────────────
+
+export interface EsAddCommandConditionArgs {
+  commandNoteId: string;
+  kind: 'pre' | 'post';
+  condition: Omit<CommandCondition, 'id'> & { id?: string };
+}
+
+export const handle_es_add_command_condition: ToolHandler<EsAddCommandConditionArgs> = (
+  { commandNoteId, kind, condition },
+  ctx,
+) => {
+  const board = getActiveBoard(ctx.projectState);
+  const note = board.notes.find((n) => n.id === commandNoteId);
+  if (!note) {
+    return {
+      ok: false,
+      resultJson: null,
+      events: [],
+      error: { code: 'NOT_FOUND', message: `Command note ${commandNoteId} not found.` },
+    };
+  }
+  if (note.type !== 'Command') {
+    return {
+      ok: false,
+      resultJson: null,
+      events: [],
+      error: { code: 'INVALID_TYPE', message: `Note ${commandNoteId} is not a Command (type: ${note.type}).` },
+    };
+  }
+  // audit MED-4: postCondition must not carry invariantId
+  if (kind === 'post' && condition.invariantId) {
+    return {
+      ok: false,
+      resultJson: null,
+      events: [],
+      error: { code: 'PRECONDITION_FAILED', message: `postCondition must not carry invariantId (linkage only applies to pre).` },
+    };
+  }
+  // invariantId validation for pre: target must exist on some Aggregate's invariants
+  if (kind === 'pre' && condition.invariantId) {
+    const referenced = board.notes.some(
+      (n) => n.type === 'Aggregate' && (n.invariants ?? []).some((inv) => inv.id === condition.invariantId),
+    );
+    if (!referenced) {
+      return {
+        ok: false,
+        resultJson: null,
+        events: [],
+        error: { code: 'NOT_FOUND', message: `Invariant ${condition.invariantId} not found in any Aggregate.` },
+      };
+    }
+  }
+
+  const newCondition: CommandCondition = {
+    ...condition,
+    id: condition.id ?? uuidv4(),
+  };
+
+  const arrayKey = kind === 'pre' ? 'preConditions' : 'postConditions';
+  if (!note[arrayKey]) note[arrayKey] = [];
+  note[arrayKey]!.push(newCondition);
+
+  const now = ctx.now();
+  note.updatedAt = now;
+  board.updatedAt = now;
+  ctx.projectState.updatedAt = now;
+
+  return {
+    ok: true,
+    resultJson: { success: true, conditionId: newCondition.id },
+    events: [
+      {
+        phase: 'post-commit',
+        action: 'update_note',
+        payload: { id: commandNoteId, [arrayKey]: note[arrayKey] },
+      },
+    ],
+  };
+};
+
+export interface EsUpdateCommandConditionsArgs {
+  commandNoteId: string;
+  preConditions?: CommandCondition[];
+  postConditions?: CommandCondition[];
+}
+
+export const handle_es_update_command_conditions: ToolHandler<EsUpdateCommandConditionsArgs> = (
+  { commandNoteId, preConditions, postConditions },
+  ctx,
+) => {
+  const board = getActiveBoard(ctx.projectState);
+  const note = board.notes.find((n) => n.id === commandNoteId);
+  if (!note) {
+    return {
+      ok: false,
+      resultJson: null,
+      events: [],
+      error: { code: 'NOT_FOUND', message: `Command note ${commandNoteId} not found.` },
+    };
+  }
+  if (note.type !== 'Command') {
+    return {
+      ok: false,
+      resultJson: null,
+      events: [],
+      error: { code: 'INVALID_TYPE', message: `Note ${commandNoteId} is not a Command (type: ${note.type}).` },
+    };
+  }
+  // audit MED-4: any postCondition with invariantId → reject
+  if (postConditions !== undefined) {
+    for (const p of postConditions) {
+      if (p.invariantId) {
+        return {
+          ok: false,
+          resultJson: null,
+          events: [],
+          error: { code: 'PRECONDITION_FAILED', message: `postCondition must not carry invariantId (linkage only applies to pre).` },
+        };
+      }
+    }
+  }
+
+  if (preConditions !== undefined) note.preConditions = preConditions;
+  if (postConditions !== undefined) note.postConditions = postConditions;
+
+  const now = ctx.now();
+  note.updatedAt = now;
+  board.updatedAt = now;
+  ctx.projectState.updatedAt = now;
+
+  // audit MED-2: single update_note payload carries both arrays (the unchanged one is also included via the current note state)
+  return {
+    ok: true,
+    resultJson: { success: true },
+    events: [
+      {
+        phase: 'post-commit',
+        action: 'update_note',
+        payload: {
+          id: commandNoteId,
+          preConditions: note.preConditions ?? [],
+          postConditions: note.postConditions ?? [],
+        },
       },
     ],
   };

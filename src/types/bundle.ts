@@ -32,6 +32,11 @@ export interface SpecProperty {
   notes?: string;
 }
 
+export interface SpecCondition {
+  text: string;
+  invariantSpecId?: string;
+}
+
 /**
  * Target categories a spec link/relationship can point at. Mirrors
  * `ElementType` but adds `ReadModel` for remodels (which aren't sticky notes).
@@ -105,7 +110,10 @@ export interface UseCaseSpec {
   behavior?: string;
   aggregate?: string;
   paths?: string[];
-  input: SpecProperty[];
+  // Hoare triple {P} c {Q} ordering (gemini-review-fix): pre → input → post → emittedEvent
+  preconditions: SpecCondition[];   // {P}
+  input: SpecProperty[];            // c
+  postconditions: SpecCondition[];  // {Q}
   emittedEvent: string;
   eventPayload: SpecProperty[];
   links?: SpecLink[];
