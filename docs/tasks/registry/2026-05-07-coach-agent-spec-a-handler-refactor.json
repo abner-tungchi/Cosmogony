@@ -1,0 +1,56 @@
+{
+  "id": "2026-05-07-coach-agent-spec-a-handler-refactor",
+  "file": "docs/tasks/2026-05-07-coach-agent-spec-a-handler-refactor.md",
+  "title": "Coach Agent — Spec A：38 個 MCP Tool Handler Refactor",
+  "status": "done",
+  "completed": "2026-05-08",
+  "created": "2026-05-07",
+  "depends_on": [],
+  "supersedes": null,
+  "discussion": "docs/discussions/2026-05-07-coach-agent-and-skill-architecture.md",
+  "preconditions": [
+    "file:mcp-server/src/index.ts",
+    "file:mcp-server/package.json"
+  ],
+  "verification": [
+    "cd mcp-server && npx tsc --noEmit",
+    "npx tsc -b",
+    "test -f mcp-server/src/coach/tools/handlers.ts",
+    "test -f mcp-server/src/coach/tools/toolDefinitions.ts",
+    "test -f mcp-server/src/coach/tools/mcpAdapter.ts",
+    "test -f mcp-server/src/coach/tools/__tests__/handlers.test.ts",
+    "test -f mcp-server/src/coach/tools/__tests__/mcpAdapter.test.ts",
+    "test -f mcp-server/src/coach/tools/__tests__/toolDefinitions.test.ts",
+    "grep -q 'export interface ToolHandlerCtx' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'export type BroadcastPhase' mcp-server/src/coach/tools/handlers.ts",
+    "grep -q 'export const TOOL_DEFINITIONS' mcp-server/src/coach/tools/toolDefinitions.ts",
+    "grep -q \"export type CommitBroadcastPolicy\" mcp-server/src/coach/tools/toolDefinitions.ts",
+    "grep -q 'export function registerMcpTools' mcp-server/src/coach/tools/mcpAdapter.ts",
+    "! grep -qE 'server\\.tool\\(' mcp-server/src/index.ts",
+    "grep -q 'registerMcpTools(server, TOOL_DEFINITIONS' mcp-server/src/index.ts",
+    "grep -q 'function saveProject' mcp-server/src/index.ts",
+    "grep -q 'function createBoard' mcp-server/src/index.ts",
+    "! grep -qE '^function getActiveBoard|^function nextEventX|^function nextRemodelX' mcp-server/src/index.ts",
+    "! grep -q 'saveProject(' mcp-server/src/coach/tools/handlers.ts",
+    "! grep -q 'loadProjectFromRelay(' mcp-server/src/coach/tools/handlers.ts",
+    "cd mcp-server && npx vitest run --reporter=default"
+  ],
+  "tags": ["refactor", "backend", "mcp", "coach", "agent-prep"],
+  "status_history": [
+    {
+      "status": "draft",
+      "at": "2026-05-07T23:30:00+08:00",
+      "session": "/write-spec from plan + R1+R2 discussion (D1, D12 driven Spec A scope)"
+    },
+    {
+      "status": "in-progress",
+      "at": "2026-05-07T23:55:00+08:00",
+      "session": "/audit-spec: 4b 5/5 PASS, 5b 7/7 PASS, Codex 5c 外部審查發現 5 個高風險（read-only 分類錯 / orphan helpers / permissive vs strict / grep -c 脆弱 / fixture 太淺）— 全部已套用修正並對齊 ground truth。Spec 從 558 行 → 694 行（含 per-tool 失敗語義對照表 + vitest runtime 斷言示例）。"
+    },
+    {
+      "status": "done",
+      "at": "2026-05-08T13:50:00+08:00",
+      "session": "/pickup auto-mode 完成 7 steps：handlers.ts (38 pure handlers + 5 internal types) / toolDefinitions.ts (TOOL_DEFINITIONS registry 38 entries, risk='unset') / mcpAdapter.ts (registerMcpTools + textFromResult + dev-mode invariant assertions) / index.ts refactor (38 server.tool 移除 + 3 orphan helpers 移除 + 2 imports + 1 行 register call) / 90 個新 vitest tests (handlers 68 / mcpAdapter 11 / toolDefinitions 11)。所有 verification 20/20 PASS：mcp-server tsc / root tsc -b / npm run build / 6 個新檔存在 / 5 個 export grep / no server.tool / registerMcpTools wired / 7 helpers preserved / 3 orphan helpers removed / handlers purity (no save/sync/broadcast/load) / adapter no .risk read / vitest 全 5 suites 106 tests 通過。Human verification (UI 5 流程 + cross-tab + Coach P1 仍正常) 待 user 親手驗。"
+    }
+  ]
+}
