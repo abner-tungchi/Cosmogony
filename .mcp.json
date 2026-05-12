@@ -2,8 +2,17 @@
   "mcpServers": {
     "event-storming": {
       "command": "node",
-      "args": ["mcp-server/dist/index.js"],
-      "cwd": "/Users/abnertsai/JiaBao/Mendesky/EventStormingTool"
+      "args": [
+        "mcp-server/dist/index.js"
+      ]
+    },
+    "orrery": {
+      "type": "stdio",
+      "command": "orrery-bin",
+      "args": [
+        "mcp-server"
+      ],
+      "env": {}
     }
   }
 }

@@ -40,29 +40,31 @@ const EXPECTED_NAMES = [
   'es_update_remodel_behavior',
   'es_update_remodel_parameters',
   'es_update_remodel_return_type',
+  'es_add_command_condition',
+  'es_update_command_conditions',
 ] as const;
 
 const VALID_POLICIES = ['read-only', 'standard', 'pre-commit-only', 'mixed', 'no-broadcast'];
 
 describe('TOOL_DEFINITIONS registry', () => {
-  it('contains exactly 38 tools', () => {
-    expect(TOOL_DEFINITIONS.length).toBe(38);
+  it('contains exactly 40 tools', () => {
+    expect(TOOL_DEFINITIONS.length).toBe(40);
   });
 
   it('tool names are unique', () => {
-    expect(new Set(TOOL_DEFINITIONS.map((d) => d.name)).size).toBe(38);
+    expect(new Set(TOOL_DEFINITIONS.map((d) => d.name)).size).toBe(40);
   });
 
   it('tool names match EXPECTED_NAMES set', () => {
     expect(new Set(TOOL_DEFINITIONS.map((d) => d.name))).toEqual(new Set(EXPECTED_NAMES));
   });
 
-  it('Spec B fills risk distribution 3+9+14+1+11 = 38', () => {
+  it('Spec v17 fills risk distribution 3+10+15+1+11 = 40', () => {
     const distribution = TOOL_DEFINITIONS.reduce<Record<string, number>>((acc, d) => {
       acc[d.risk] = (acc[d.risk] ?? 0) + 1;
       return acc;
     }, {});
-    expect(distribution).toEqual({ read: 3, additive: 9, mutate: 14, destructive: 1, unset: 11 });
+    expect(distribution).toEqual({ read: 3, additive: 10, mutate: 15, destructive: 1, unset: 11 });
   });
 
   it("'read' risk maps to 3 tools (exact set)", () => {
@@ -71,7 +73,7 @@ describe('TOOL_DEFINITIONS registry', () => {
     );
   });
 
-  it("'additive' risk maps to exact 9 tools (es_link_entity_to_aggregate_root NOT in)", () => {
+  it("'additive' includes es_add_command_condition (Spec v17)", () => {
     expect(new Set(TOOL_DEFINITIONS.filter((d) => d.risk === 'additive').map((d) => d.name))).toEqual(
       new Set([
         'es_create_context',
@@ -83,12 +85,13 @@ describe('TOOL_DEFINITIONS registry', () => {
         'es_add_invariant',
         'es_add_link',
         'es_add_flow_path',
+        'es_add_command_condition',
       ]),
     );
   });
 
-  it("'mutate' risk maps to 14 tools incl. es_link_entity_to_aggregate_root (audit HIGH-4)", () => {
-    expect(TOOL_DEFINITIONS.filter((d) => d.risk === 'mutate').length).toBe(14);
+  it("'mutate' risk maps to 15 tools incl. es_update_command_conditions (Spec v17)", () => {
+    expect(TOOL_DEFINITIONS.filter((d) => d.risk === 'mutate').length).toBe(15);
     expect(new Set(TOOL_DEFINITIONS.filter((d) => d.risk === 'mutate').map((d) => d.name))).toEqual(
       new Set([
         'es_update_note',
@@ -105,6 +108,7 @@ describe('TOOL_DEFINITIONS registry', () => {
         'es_update_remodel_behavior',
         'es_update_remodel_parameters',
         'es_update_remodel_return_type',
+        'es_update_command_conditions',
       ]),
     );
   });
@@ -152,8 +156,8 @@ describe('TOOL_DEFINITIONS registry', () => {
     ]);
   });
 
-  it("'standard' policy contains 32 tools", () => {
-    expect(TOOL_DEFINITIONS.filter((d) => d.policy === 'standard').length).toBe(32);
+  it("'standard' policy contains 34 tools", () => {
+    expect(TOOL_DEFINITIONS.filter((d) => d.policy === 'standard').length).toBe(34);
   });
 
   it('each tool has handler and non-empty description', () => {

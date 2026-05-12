@@ -38,6 +38,8 @@ import {
   handle_es_update_remodel_behavior,
   handle_es_update_remodel_parameters,
   handle_es_update_remodel_return_type,
+  handle_es_add_command_condition,
+  handle_es_update_command_conditions,
 } from '../handlers.js';
 import type {
   Project,
@@ -47,7 +49,9 @@ import type {
   Link,
   FlowPath,
   ToolHandlerCtx,
+  CommandCondition,
 } from '../handlers.js';
+import { v4 as uuidv4 } from 'uuid';
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -1154,5 +1158,223 @@ describe('Remodel spec handlers', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.error?.code).toBe('NOT_FOUND');
+  });
+});
+
+// ─── Command conditions (Spec v17) ─────────────────────────────────────────
+
+describe('Command conditions (Spec v17)', () => {
+  it('handle_es_add_command_condition happy path (kind=pre)', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'cmd-1', kind: 'pre', condition: { text: '顧客信用額度 ≥ 訂單金額' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1');
+    expect(cmd?.preConditions?.length).toBe(1);
+    expect(cmd?.preConditions?.[0].text).toBe('顧客信用額度 ≥ 訂單金額');
+  });
+
+  it('handle_es_add_command_condition happy path (kind=post)', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'cmd-1', kind: 'post', condition: { text: '訂單已建立' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1');
+    expect(cmd?.postConditions?.length).toBe(1);
+  });
+
+  it('handle_es_add_command_condition NOT_FOUND when Command missing', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'ghost', kind: 'pre', condition: { text: 'x' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('NOT_FOUND');
+  });
+
+  it('handle_es_add_command_condition INVALID_TYPE when target is DomainEvent', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'evt-1', kind: 'pre', condition: { text: 'x' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('INVALID_TYPE');
+  });
+
+  it('handle_es_add_command_condition NOT_FOUND when invariantId references missing invariant', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'cmd-1', kind: 'pre', condition: { text: 'x', invariantId: 'inv-ghost' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('NOT_FOUND');
+    expect(r.error?.message).toMatch(/Invariant.*not found/);
+  });
+
+  it('handle_es_add_command_condition PRECONDITION_FAILED when postCondition carries invariantId (audit MED-4)', () => {
+    const p = buildRichProject();
+    const r = handle_es_add_command_condition(
+      { commandNoteId: 'cmd-1', kind: 'post', condition: { text: 'x', invariantId: 'inv-1' } },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('PRECONDITION_FAILED');
+    expect(r.error?.message).toMatch(/postCondition must not carry invariantId/);
+  });
+
+  it('handle_es_update_command_conditions emits single update_note with both arrays (audit MED-2)', () => {
+    const p = buildRichProject();
+    const r = handle_es_update_command_conditions(
+      {
+        commandNoteId: 'cmd-1',
+        preConditions: [{ id: 'pre-1', text: 'pre-a' }],
+        postConditions: [{ id: 'post-1', text: 'post-a' }],
+      },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    expect(r.events.length).toBe(1);
+    const payload = r.events[0].payload as { preConditions: unknown[]; postConditions: unknown[] };
+    expect(payload.preConditions).toHaveLength(1);
+    expect(payload.postConditions).toHaveLength(1);
+  });
+
+  it('handle_es_update_command_conditions undefined means no change', () => {
+    const p = buildRichProject();
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1')!;
+    cmd.preConditions = [{ id: 'pre-1', text: 'existing' }];
+    cmd.postConditions = [{ id: 'post-1', text: 'existing-post' }];
+
+    const r = handle_es_update_command_conditions(
+      { commandNoteId: 'cmd-1', preConditions: [{ id: 'pre-2', text: 'new' }] },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    expect(cmd.preConditions?.length).toBe(1);
+    expect(cmd.preConditions?.[0].text).toBe('new');
+    expect(cmd.postConditions?.length).toBe(1);
+    expect(cmd.postConditions?.[0].text).toBe('existing-post');
+  });
+
+  it('handle_es_update_command_conditions [] clears the array', () => {
+    const p = buildRichProject();
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1')!;
+    cmd.preConditions = [{ id: 'pre-1', text: 'existing' }];
+    const r = handle_es_update_command_conditions(
+      { commandNoteId: 'cmd-1', preConditions: [] },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    expect(cmd.preConditions).toEqual([]);
+  });
+
+  it('handle_es_update_command_conditions PRECONDITION_FAILED when postCondition has invariantId', () => {
+    const p = buildRichProject();
+    const r = handle_es_update_command_conditions(
+      {
+        commandNoteId: 'cmd-1',
+        postConditions: [{ id: 'post-1', text: 'x', invariantId: 'inv-1' } as unknown as CommandCondition],
+      },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.error?.code).toBe('PRECONDITION_FAILED');
+  });
+});
+
+describe('Command creation paths initialize condition arrays (audit HIGH-1)', () => {
+  it('handle_es_add_note for Command-type initializes empty arrays', () => {
+    const p = buildEmptyProject();
+    const r = handle_es_add_note(
+      { type: 'Command', label: 'PlaceOrder', x: 0, y: 0 },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    const newNote = p.boards[0].notes[0];
+    expect(newNote.type).toBe('Command');
+    expect(newNote.preConditions).toEqual([]);
+    expect(newNote.postConditions).toEqual([]);
+  });
+
+  it('handle_es_add_note for non-Command (e.g. Hotspot) does NOT add condition arrays', () => {
+    const p = buildEmptyProject();
+    const r = handle_es_add_note(
+      { type: 'Hotspot', label: 'Q1', x: 0, y: 0 },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    const newNote = p.boards[0].notes[0];
+    expect(newNote.preConditions).toBeUndefined();
+    expect(newNote.postConditions).toBeUndefined();
+  });
+
+  it('handle_es_add_command_for_event initializes both arrays on new Command', () => {
+    const p = buildRichProject();
+    // build a fresh DomainEvent first to attach a new command to
+    const evtId = uuidv4();
+    p.boards[0].notes.push({
+      id: evtId,
+      type: 'DomainEvent',
+      label: 'OrderPlaced2',
+      position: { x: 0, y: 0 },
+      size: { width: 160, height: 80 },
+      zIndex: 1,
+      paths: [],
+      createdAt: FIXED_NOW,
+      updatedAt: FIXED_NOW,
+    });
+    const r = handle_es_add_command_for_event(
+      { eventNoteId: evtId, commandLabel: 'PlaceOrder2', information: [] },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    const cmd = p.boards[0].notes.find((n) => n.type === 'Command' && n.label === 'PlaceOrder2');
+    expect(cmd?.preConditions).toEqual([]);
+    expect(cmd?.postConditions).toEqual([]);
+  });
+});
+
+describe('handle_es_delete_invariant cascade (audit HIGH-2)', () => {
+  it('cascades to Command preCondition.invariantId → soft-null + _brokenInvariantLink + emit update_note', () => {
+    const p = buildRichProject();
+    // arrange: add a Command preCondition linked to inv-1 (existing in agg-1)
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1')!;
+    cmd.preConditions = [{ id: 'pre-1', text: 'rule', invariantId: 'inv-1' }];
+
+    const r = handle_es_delete_invariant(
+      { noteId: 'agg-1', invariantId: 'inv-1' },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    // cascade verified: preCondition lost its invariantId, gained _brokenInvariantLink
+    expect(cmd.preConditions[0].invariantId).toBeUndefined();
+    expect(cmd.preConditions[0]._brokenInvariantLink?.previousId).toBe('inv-1');
+    expect(cmd.preConditions[0]._brokenInvariantLink?.deletedAt).toBeTruthy();
+    // events: should include cascade event for the Command note
+    const cascadeEvt = r.events.find((e) => (e.payload as { id?: string }).id === 'cmd-1');
+    expect(cascadeEvt).toBeDefined();
+    expect(cascadeEvt?.action).toBe('update_note');
+  });
+
+  it('handle_es_delete_invariant does NOT touch unrelated Commands (no preCondition link)', () => {
+    const p = buildRichProject();
+    const cmd = p.boards[0].notes.find((n) => n.id === 'cmd-1')!;
+    cmd.preConditions = []; // no link
+    const beforeUpdatedAt = cmd.updatedAt;
+
+    const r = handle_es_delete_invariant(
+      { noteId: 'agg-1', invariantId: 'inv-1' },
+      ctxFor(p),
+    );
+    expect(r.ok).toBe(true);
+    // cmd untouched
+    expect(cmd.updatedAt).toBe(beforeUpdatedAt);
   });
 });

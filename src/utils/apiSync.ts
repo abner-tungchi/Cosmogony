@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useBoardStore } from '../store/boardStore';
 import { useUIStore } from '../store/uiStore';
+import { useCoachStore } from '../store/coachStore';
 import type { BoardStore, Project } from '../types/board';
 import type { FlowPath, Remodel, StickyNote } from '../types/elements';
+import type { ProposedAction, ProposedActionStatus } from '../types/coach';
 
 // Stable clientId for this browser tab (survives refreshes, new tab = new ID)
 // Uses uuid package instead of crypto.randomUUID() because the latter is only
@@ -236,6 +238,31 @@ function dispatch(action: string, payload: unknown, store: BoardStore) {
       // delete-board is healed by useReconcileUIState (App-level effect).
       store.loadProject(payload as Project);
       break;
+
+    // ── Coach action lifecycle ────────────────────────────────────────────
+    case 'coach_action_update': {
+      // BE broadcast payload: { sessionId, actionId, status, delta? }
+      // See mcp-server/src/coach/agent/pendingActions.ts ACTION_UPDATE_SSE_CHANNEL.
+      try {
+        const cp = p as {
+          sessionId?: string;
+          actionId?: string;
+          status?: ProposedActionStatus;
+          delta?: Partial<ProposedAction>;
+        };
+        if (typeof cp.sessionId === 'string' && typeof cp.actionId === 'string' && cp.status) {
+          useCoachStore.getState().applyActionUpdate({
+            sessionId: cp.sessionId,
+            actionId: cp.actionId,
+            status: cp.status,
+            delta: cp.delta,
+          });
+        }
+      } catch (err) {
+        console.warn('[apiSync] coach_action_update handler failed:', err);
+      }
+      break;
+    }
 
     default:
       // Surface unknown broadcasts so we notice when the server adds a new

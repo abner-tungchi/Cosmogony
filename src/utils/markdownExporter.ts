@@ -65,10 +65,40 @@ export function exportToMarkdown(board: Board): string {
         const cmdNote = board.notes.find((n) => n.id === event.commandId);
         if (cmdNote) {
           lines.push(`- **Command**: ${cmdNote.label}`);
+          // gemini-review-fix: Hoare {P} c {Q} ordering — Preconditions before Parameters (input)
+          if (cmdNote.preConditions && cmdNote.preConditions.length > 0) {
+            lines.push(`- **Preconditions**:`);
+            for (const pre of cmdNote.preConditions) {
+              let line = `  - ${pre.text}`;
+              // textual reference (audit LOW-3) — not a markdown anchor link
+              if (pre.invariantId) {
+                const invHost = board.notes.find(
+                  (n) =>
+                    n.type === 'Aggregate' &&
+                    (n.invariants ?? []).some((inv) => inv.id === pre.invariantId)
+                );
+                const invMatch = invHost?.invariants?.find((inv) => inv.id === pre.invariantId);
+                if (invMatch) {
+                  const refLabel = invMatch.title ?? invMatch.name ?? pre.invariantId;
+                  line += ` _(links to invariant: ${refLabel})_`;
+                }
+              }
+              if (pre._brokenInvariantLink) {
+                line += ` ⚠️ _(linked invariant deleted)_`;
+              }
+              lines.push(line);
+            }
+          }
           if (cmdNote.information && cmdNote.information.length > 0) {
             lines.push(`- **Parameters**:`);
             for (const prop of cmdNote.information) {
               lines.push(`  - ${prop.attrName}: ${prop.type}`);
+            }
+          }
+          if (cmdNote.postConditions && cmdNote.postConditions.length > 0) {
+            lines.push(`- **Postconditions**:`);
+            for (const post of cmdNote.postConditions) {
+              lines.push(`  - ${post.text}`);
             }
           }
         }

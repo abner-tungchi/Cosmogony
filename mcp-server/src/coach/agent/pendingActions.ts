@@ -63,6 +63,12 @@ export interface ProjectSnapshot {
       eventProperties?: unknown[];
       dtoFields?: unknown[];
       invariants?: unknown[];
+      preConditions?: unknown[];
+      postConditions?: unknown[];
+      // gemini-review-fix: include semantic Command/DomainEvent fields so CAS hash
+      // catches information schema and behavior text changes too
+      information?: unknown[];
+      behavior?: string;
     }>;
     remodels: Array<{ id: string }>;
   }>;
@@ -120,6 +126,12 @@ function stableSubset(note: ProjectSnapshot['boards'][number]['notes'][number]) 
     eventProperties: note.eventProperties ?? [],
     dtoFields: note.dtoFields ?? [],
     invariants: note.invariants ?? [],
+    // Spec v17: condition arrays affect Command identity; CAS reverify must hash them
+    preConditions: note.preConditions ?? [],
+    postConditions: note.postConditions ?? [],
+    // gemini-review-fix: information schema and behavior text are also semantic
+    information: note.information ?? [],
+    behavior: note.behavior ?? '',
   };
 }
 

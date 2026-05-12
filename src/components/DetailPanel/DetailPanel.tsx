@@ -12,25 +12,17 @@ import { AggregatePanel } from './AggregatePanel';
 import { DtoPanel } from './DtoPanel';
 import { PolicyPanel } from './PolicyPanel';
 import { ReturnTypeEditor } from './ReturnTypeEditor';
+import { CommandConditionEditor, collectAggregateInvariants } from './CommandConditionEditor';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-
-const PANEL_WIDTH_DEFAULT = 360;
-const PANEL_WIDTH_MIN = 280;
-const PANEL_WIDTH_MAX = 720;
-const PANEL_WIDTH_STORAGE_KEY = 'es-detail-panel-width';
-
-function readStoredPanelWidth(): number {
-  try {
-    const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
-    if (!raw) return PANEL_WIDTH_DEFAULT;
-    const n = parseInt(raw, 10);
-    if (Number.isFinite(n)) return Math.min(PANEL_WIDTH_MAX, Math.max(PANEL_WIDTH_MIN, n));
-  } catch {
-    // localStorage 被禁用 / 隱私模式 → 走預設值
-  }
-  return PANEL_WIDTH_DEFAULT;
-}
+//
+// 自管寬度（PANEL_WIDTH_*、es-detail-panel-width localStorage）已移除。
+// 寬高現在由 RightColumn (src/components/Coach/RightColumn.tsx) 透過 props 傳入；
+// DetailPanel 只負責內部 layout 與 sub-panel 切換。
+//
+// 既有 isOpen / Esc listener / missing-element cleanup useEffect 維持 always-mounted
+// 行為 — 當 containerHeight 為 0 時 root div 變成 collapsed（高度 0、overflow hidden），
+// 但 hooks 仍會 fire（保留 selection lifecycle）。
 
 const PANEL_BG = '#1e293b';
 const BORDER_COLOR = 'rgba(255,255,255,0.08)';
@@ -52,6 +44,52 @@ const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => 
     {children}
   </div>
 );
+
+interface CollapsibleSectionProps {
+  label: string;
+  defaultOpen: boolean;
+  help?: string;
+  children: React.ReactNode;
+}
+
+const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({ label, defaultOpen, help, children }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          width: '100%',
+          background: 'transparent',
+          border: 'none',
+          padding: '2px 0',
+          cursor: 'pointer',
+          color: TEXT_MUTED,
+          fontSize: 10,
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}
+      >
+        <span>{open ? '▾' : '▸'}</span>
+        <span>{label}</span>
+        {help && (
+          <span
+            title={help}
+            style={{ marginLeft: 'auto', color: TEXT_MUTED, fontSize: 12, cursor: 'help' }}
+          >
+            ?
+          </span>
+        )}
+      </button>
+      {open && <div style={{ marginTop: 6 }}>{children}</div>}
+    </div>
+  );
+};
 
 interface InlineFieldProps {
   label: string;
@@ -316,7 +354,7 @@ interface GroupPanelProps {
 }
 
 const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAddCommand, onSetEntity }) => {
-  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent, linkEventToAggregate, setEntityAsAggregateRoot, unsetEntityAsAggregateRoot } = useBoardStore();
+  const { updateNote, updateCommandInformation, updateEventProperties, linkEntityToEvent, linkEventToAggregate, setEntityAsAggregateRoot, unsetEntityAsAggregateRoot, updateCommandConditions } = useBoardStore();
 
   const linkedCommand = note.commandId ? allNotes.find((n) => n.id === note.commandId) : undefined;
   const linkedEntityOrAggregate = note.entityId ? allNotes.find((n) => n.id === note.entityId) : undefined;
@@ -697,6 +735,22 @@ const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAd
         )}
       </div>
 
+      {/* PRE-CONDITIONS (Spec v17, Hoare {P}) */}
+      {linkedCommand && (
+        <CollapsibleSection
+          label="前置狀態（Pre-conditions）"
+          defaultOpen={(linkedCommand.preConditions?.length ?? 0) > 0}
+          help="本 Command 接受前必須滿足的狀態；可選擇連結到 Aggregate invariant"
+        >
+          <CommandConditionEditor
+            conditions={linkedCommand.preConditions ?? []}
+            allAggregateInvariants={collectAggregateInvariants(allNotes)}
+            kind="pre"
+            onChange={(next) => updateCommandConditions(linkedCommand.id, next, undefined)}
+          />
+        </CollapsibleSection>
+      )}
+
       {/* INFORMATION */}
       <div style={{ marginBottom: 16 }}>
         <SectionLabel>Information (Command Input)</SectionLabel>
@@ -716,6 +770,22 @@ const GroupPanel: React.FC<GroupPanelProps> = ({ note, allNotes, flowPaths, onAd
           </div>
         )}
       </div>
+
+      {/* POST-CONDITIONS (Spec v17, Hoare {Q}) */}
+      {linkedCommand && (
+        <CollapsibleSection
+          label="執行後狀態（Post-conditions）"
+          defaultOpen={(linkedCommand.postConditions?.length ?? 0) > 0}
+          help="本 Command 成功執行後，必須斷言的狀態變化（不同於『產生的 events』）"
+        >
+          <CommandConditionEditor
+            conditions={linkedCommand.postConditions ?? []}
+            allAggregateInvariants={[]}
+            kind="post"
+            onChange={(next) => updateCommandConditions(linkedCommand.id, undefined, next)}
+          />
+        </CollapsibleSection>
+      )}
 
       {divider}
 
@@ -2074,69 +2144,19 @@ const RemodelPanel: React.FC<RemodelPanelProps> = ({ remodel, allNotes }) => {
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
 interface DetailPanelProps {
+  containerHeight: number;            // 由 RightColumn 傳入；0 = collapsed
+  containerWidth: number;
+  hidden?: boolean;                   // 小螢幕 tab 切走時 true（用 display:none 隱藏，仍保持 mount）
   onAddCommand?: (noteId: string) => void;
   onSetEntity?: (noteId: string) => void;
 }
 
-export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEntity }) => {
+export const DetailPanel: React.FC<DetailPanelProps> = ({ containerHeight, containerWidth, hidden, onAddCommand, onSetEntity }) => {
   const { selectedElementId, selectedElementType, setSelectedElement } = useUIStore();
   const activeBoard = useActiveBoard();
   const panelRef = useRef<HTMLDivElement>(null);
-  const [panelWidth, setPanelWidth] = useState<number>(() => readStoredPanelWidth());
-  const [isResizing, setIsResizing] = useState(false);
 
   const isOpen = selectedElementId !== null;
-
-  // Pointer-driven resize. Pointer capture keeps drag state attached to the
-  // handle even when the cursor moves over other elements. Width persists to
-  // localStorage on pointer up, not on every move, to avoid spamming writes.
-  const handleResizePointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    setIsResizing(true);
-
-    const onMove = (ev: PointerEvent) => {
-      const next = Math.min(
-        PANEL_WIDTH_MAX,
-        Math.max(PANEL_WIDTH_MIN, window.innerWidth - ev.clientX)
-      );
-      setPanelWidth(next);
-    };
-    const onUp = (ev: PointerEvent) => {
-      const finalWidth = Math.min(
-        PANEL_WIDTH_MAX,
-        Math.max(PANEL_WIDTH_MIN, window.innerWidth - ev.clientX)
-      );
-      try {
-        localStorage.setItem(PANEL_WIDTH_STORAGE_KEY, String(finalWidth));
-      } catch {
-        // localStorage 滿 / 被禁 — 寬度仍維持本 session，只是不持久化
-      }
-      setIsResizing(false);
-      // pointer capture lost guards: see lostpointercapture handler — release
-      // is unnecessary if capture already lost; only call when still held.
-      if (handle.hasPointerCapture(ev.pointerId)) {
-        handle.releasePointerCapture(ev.pointerId);
-      }
-      handle.removeEventListener('pointermove', onMove);
-      handle.removeEventListener('pointerup', onUp);
-      handle.removeEventListener('pointercancel', onUp);
-      handle.removeEventListener('lostpointercapture', onLost);
-    };
-    const onLost = () => {
-      setIsResizing(false);
-      handle.removeEventListener('pointermove', onMove);
-      handle.removeEventListener('pointerup', onUp);
-      handle.removeEventListener('pointercancel', onUp);
-      handle.removeEventListener('lostpointercapture', onLost);
-    };
-
-    handle.addEventListener('pointermove', onMove);
-    handle.addEventListener('pointerup', onUp);
-    handle.addEventListener('pointercancel', onUp);
-    handle.addEventListener('lostpointercapture', onLost);
-  }, []);
 
   // Esc key to close
   useEffect(() => {
@@ -2181,53 +2201,19 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({ onAddCommand, onSetEnt
     <div
       ref={panelRef}
       style={{
-        position: 'fixed',
-        right: 0,
-        top: 0,
-        height: '100vh',
-        width: panelWidth,
+        // 寬高由 RightColumn 透過 props 控制；移除 fixed positioning。
+        // height: 0 時 collapsed（保留 mount，hooks 照常 fire）。
+        width: containerWidth,
+        height: containerHeight,
         background: PANEL_BG,
-        borderLeft: `1px solid ${BORDER_COLOR}`,
-        zIndex: 50,
-        transform: isOpen ? 'translateX(0)' : `translateX(${panelWidth}px)`,
-        // Disable transition during resize so width tracks the cursor
-        // exactly. Without this, drags briefly lag the pointer.
-        transition: isResizing ? 'none' : 'transform 300ms cubic-bezier(0,0,0.2,1)',
-        display: 'flex',
+        flexShrink: 0,
+        transition: 'height 240ms cubic-bezier(0,0,0.2,1)',
+        display: hidden ? 'none' : 'flex',
         flexDirection: 'column',
         overflowY: 'auto',
         overflowX: 'hidden',
-        userSelect: isResizing ? 'none' : undefined,
       }}
     >
-      {/* Resize handle on left edge — only visible / interactable while panel is open. */}
-      {isOpen && (
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize detail panel"
-          onPointerDown={handleResizePointerDown}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: 6,
-            height: '100%',
-            cursor: 'col-resize',
-            zIndex: 60,
-            // Hover gives a faint vertical bar; while resizing keep it solid
-            // for visual feedback that the drag is active.
-            background: isResizing ? 'rgba(96, 165, 250, 0.6)' : 'transparent',
-            transition: isResizing ? 'none' : 'background 120ms ease',
-          }}
-          onMouseEnter={(e) => {
-            if (!isResizing) (e.currentTarget as HTMLDivElement).style.background = 'rgba(96, 165, 250, 0.35)';
-          }}
-          onMouseLeave={(e) => {
-            if (!isResizing) (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-          }}
-        />
-      )}
       {/* Header */}
       <div style={{
         padding: '16px 16px 12px',

@@ -1,4 +1,4 @@
-// Single source of truth for the 38 MCP tool registrations.
+// Single source of truth for the 40 MCP tool registrations.
 //
 // Spec A: name + description + schema + handler + policy + risk='unset'.
 // Spec B will populate `risk` with read / additive / mutate / destructive.
@@ -47,6 +47,8 @@ import {
   handle_es_update_remodel_behavior,
   handle_es_update_remodel_parameters,
   handle_es_update_remodel_return_type,
+  handle_es_add_command_condition,
+  handle_es_update_command_conditions,
 } from './handlers.js';
 
 export type CommitBroadcastPolicy =
@@ -722,6 +724,51 @@ Returns { success: true, invariantId, status, provenance }.`,
         .describe('New review status'),
     },
     handler: handle_es_set_invariant_status as ToolHandler<unknown>,
+    policy: 'standard',
+    risk: 'mutate',
+  },
+  {
+    name: 'es_add_command_condition',
+    description:
+      'Append a single pre/post condition to a Command note. Used when discovering edge cases incrementally during domain modeling. Optional invariantId (pre only) links to an Aggregate invariant.',
+    schema: {
+      commandNoteId: z.string(),
+      kind: z.enum(['pre', 'post']),
+      condition: z.object({
+        id: z.string().optional(),
+        text: z.string(),
+        invariantId: z.string().optional(),
+      }),
+    },
+    handler: handle_es_add_command_condition as ToolHandler<unknown>,
+    policy: 'standard',
+    risk: 'additive',
+  },
+  {
+    name: 'es_update_command_conditions',
+    description:
+      'Batch-replace pre and/or post conditions on a Command note. undefined means no change; [] means clear (including broken-link flags).',
+    schema: {
+      commandNoteId: z.string(),
+      preConditions: z
+        .array(
+          z.object({
+            id: z.string(),
+            text: z.string(),
+            invariantId: z.string().optional(),
+          }),
+        )
+        .optional(),
+      postConditions: z
+        .array(
+          z.object({
+            id: z.string(),
+            text: z.string(),
+          }),
+        )
+        .optional(),
+    },
+    handler: handle_es_update_command_conditions as ToolHandler<unknown>,
     policy: 'standard',
     risk: 'mutate',
   },
