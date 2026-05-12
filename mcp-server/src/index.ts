@@ -446,8 +446,12 @@ const baseDddGuide = loadBaseDddGuide();
 const userDraft = loadUserDraft();
 const geminiApiKey = process.env.GEMINI_API_KEY;
 const geminiModel = process.env.GEMINI_MODEL;
+// Feature flag (default ON). Set ENABLE_COACH=false to skip Coach entirely.
+const enableCoach = (process.env.ENABLE_COACH ?? 'true').trim().toLowerCase() !== 'false';
 
-if (geminiApiKey) {
+if (!enableCoach) {
+  process.stderr.write('Coach disabled by ENABLE_COACH=false — /api/coach routes not mounted\n');
+} else if (geminiApiKey) {
   const llm = new GeminiAdapter({ apiKey: geminiApiKey, model: geminiModel });
   const skill = new EventStormingSkill();
   const pendingStore = createFsPendingActionStore({ dataDir: coachDataDir });

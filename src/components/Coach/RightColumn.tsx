@@ -3,6 +3,7 @@ import { useUIStore } from '../../store/uiStore';
 import { DetailPanel } from '../DetailPanel/DetailPanel';
 import { CoachPanel } from './CoachPanel';
 import { invokeAddCommand, invokeSetEntity } from '../../utils/modalCallbacks';
+import { COACH_ENABLED } from '../../utils/featureFlags';
 
 const WIDTH_KEY = 'es-right-column-width';
 const LEGACY_WIDTH_KEY = 'es-detail-panel-width';
@@ -237,32 +238,36 @@ export const RightColumn: React.FC = () => {
         }}
       >
         <VerticalResizeBar onResize={onWidthDelta} />
-        <div
-          style={{
-            height: TAB_HEADER_H,
-            display: 'flex',
-            borderBottom: `1px solid ${BORDER_COLOR}`,
-            flexShrink: 0,
-          }}
-        >
-          <TabButton active={activeTab === 'detail'} onClick={() => setActiveTab('detail')}>
-            Detail
-          </TabButton>
-          <TabButton active={activeTab === 'coach'} onClick={() => setActiveTab('coach')}>
-            Coach
-          </TabButton>
-        </div>
+        {COACH_ENABLED && (
+          <div
+            style={{
+              height: TAB_HEADER_H,
+              display: 'flex',
+              borderBottom: `1px solid ${BORDER_COLOR}`,
+              flexShrink: 0,
+            }}
+          >
+            <TabButton active={activeTab === 'detail'} onClick={() => setActiveTab('detail')}>
+              Detail
+            </TabButton>
+            <TabButton active={activeTab === 'coach'} onClick={() => setActiveTab('coach')}>
+              Coach
+            </TabButton>
+          </div>
+        )}
         <div ref={tabContainerRef} tabIndex={-1} style={{ flex: 1, position: 'relative', overflow: 'hidden', outline: 'none' }}>
           <DetailPanel
             containerHeight={detailH}
             containerWidth={width}
-            hidden={activeTab !== 'detail'}
+            hidden={COACH_ENABLED ? activeTab !== 'detail' : false}
             onAddCommand={invokeAddCommand}
             onSetEntity={invokeSetEntity}
           />
-          <div style={{ display: activeTab === 'coach' ? 'block' : 'none', height: '100%' }}>
-            <CoachPanel height={coachH} width={width} />
-          </div>
+          {COACH_ENABLED && (
+            <div style={{ display: activeTab === 'coach' ? 'block' : 'none', height: '100%' }}>
+              <CoachPanel height={coachH} width={width} />
+            </div>
+          )}
         </div>
       </div>
     );
@@ -270,10 +275,13 @@ export const RightColumn: React.FC = () => {
 
   // Wide-screen: stacked layout, DetailPanel always-mounted, height 切換。
   // ResizeBar 佔 5px，總高度需扣除避免溢出產生意外捲軸。
+  // Coach disabled (feature flag) → DetailPanel 吃整個 column 高度，無 ResizeBar / CoachPanel。
   const RESIZE_BAR_H = 5;
-  const usableH = isOpen ? innerHeight - RESIZE_BAR_H : innerHeight;
-  const detailH = isOpen ? Math.round(usableH * (1 - ratio)) : 0;
-  const coachH = isOpen ? usableH - detailH : innerHeight;
+  const wideUsableH = COACH_ENABLED && isOpen ? innerHeight - RESIZE_BAR_H : innerHeight;
+  const detailH = COACH_ENABLED
+    ? (isOpen ? Math.round(wideUsableH * (1 - ratio)) : 0)
+    : innerHeight;
+  const coachH = COACH_ENABLED && isOpen ? wideUsableH - detailH : innerHeight;
 
   return (
     <div
@@ -297,8 +305,8 @@ export const RightColumn: React.FC = () => {
         onAddCommand={invokeAddCommand}
         onSetEntity={invokeSetEntity}
       />
-      {isOpen && <HorizontalResizeBar onResize={onRatioDelta} />}
-      <CoachPanel height={coachH} width={width} />
+      {COACH_ENABLED && isOpen && <HorizontalResizeBar onResize={onRatioDelta} />}
+      {COACH_ENABLED && <CoachPanel height={coachH} width={width} />}
     </div>
   );
 };

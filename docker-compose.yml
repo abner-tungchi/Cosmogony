@@ -3,6 +3,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Feature flag baked at build time (default true). Override via:
+        #   VITE_ENABLE_COACH=false docker compose build frontend
+        VITE_ENABLE_COACH: ${VITE_ENABLE_COACH:-true}
     container_name: event-storming-frontend
     ports:
       - "5173:80"
@@ -21,6 +25,9 @@ services:
       # Override compile-time defaults (Dockerfile sets these; redeclared for clarity)
       - COACH_DATA_DIR=/app/data/coach
       - COACH_SYSTEM_PROMPT_FILE=/app/prompts/system_prompt.md
+      # Feature flag — set ENABLE_COACH=false to skip Coach router mount entirely.
+      # Default true; must match VITE_ENABLE_COACH on the frontend service for consistency.
+      - ENABLE_COACH=${ENABLE_COACH:-true}
     env_file:
       # User puts GEMINI_API_KEY here on the server before `docker compose up`.
       # File is gitignored; .env.example shows the expected keys.
