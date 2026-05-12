@@ -11,9 +11,10 @@ RUN npm ci
 COPY . .
 
 # Feature flags (Vite reads VITE_* env vars at build time and inlines them
-# into the bundle via import.meta.env). Override via:
-#   docker compose build --build-arg VITE_ENABLE_COACH=false frontend
-ARG VITE_ENABLE_COACH=true
+# into the bundle via import.meta.env). Default: Coach OFF (opt-in).
+# Enable via:
+#   docker compose build --build-arg VITE_ENABLE_COACH=true frontend
+ARG VITE_ENABLE_COACH=false
 ENV VITE_ENABLE_COACH=$VITE_ENABLE_COACH
 
 RUN npm run build

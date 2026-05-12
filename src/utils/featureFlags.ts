@@ -23,9 +23,9 @@ function readBool(raw: unknown, fallback: boolean): boolean {
 /**
  * Whether the AI Coach UI is rendered (CoachPanel + Coach tab).
  * When false, RightColumn renders only DetailPanel.
- * Default: true (preserve current dogfood behavior).
+ * Default: false — Coach is opt-in. Set VITE_ENABLE_COACH=true to enable.
  */
 export const COACH_ENABLED: boolean = readBool(
   import.meta.env.VITE_ENABLE_COACH,
-  true,
+  false,
 );
