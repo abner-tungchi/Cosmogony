@@ -4,6 +4,9 @@ dist
 
 # Runtime state (mounted as volume at runtime)
 data
+# Exception: bake Coach read-only prompt into the image
+!data/coach
+!data/coach/system_prompt.md
 
 # Version control
 .git
@@ -23,7 +26,8 @@ npm-debug.log*
 .env.*
 
 # Docs
-CLAUDE.md
+# (CLAUDE.md is intentionally kept — Coach loadBaseDddGuide reads it as the
+# DDD domain expert guide; the Dockerfile bakes it into /app/CLAUDE.md.)
 
 # Docker
 Dockerfile
