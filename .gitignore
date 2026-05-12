@@ -24,6 +24,9 @@ mcp-server/mcp-server/
 # TypeScript build artifacts
 mcp-server/tsconfig.tsbuildinfo
 
+# Gemini CLI local settings (per-user, not project-shared)
+.gemini/
+
 # Environment variables (API keys etc.)
 .env
 .env.*
