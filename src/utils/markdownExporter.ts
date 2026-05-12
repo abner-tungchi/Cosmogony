@@ -61,10 +61,18 @@ export function exportToMarkdown(board: Board): string {
       if (event.behavior) {
         lines.push(`- **Behavior**: ${event.behavior}`);
       }
+      // Free-form event notes (use case flow / cautions written on the DomainEvent sticky)
+      if (event.notes && event.notes.trim()) {
+        lines.push(`- **Notes (event)**: ${event.notes.trim().replace(/\n/g, ' / ')}`);
+      }
       if (event.commandId) {
         const cmdNote = board.notes.find((n) => n.id === event.commandId);
         if (cmdNote) {
           lines.push(`- **Command**: ${cmdNote.label}`);
+          // Free-form command notes (flow / cautions written on the Command sticky)
+          if (cmdNote.notes && cmdNote.notes.trim()) {
+            lines.push(`- **Notes (command)**: ${cmdNote.notes.trim().replace(/\n/g, ' / ')}`);
+          }
           // gemini-review-fix: Hoare {P} c {Q} ordering — Preconditions before Parameters (input)
           if (cmdNote.preConditions && cmdNote.preConditions.length > 0) {
             lines.push(`- **Preconditions**:`);

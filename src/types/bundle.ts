@@ -108,6 +108,13 @@ export interface UseCaseSpec {
   aggregateSpecId?: string;
   useCase: string;
   behavior?: string;
+  /**
+   * Free-form annotations collected from the DomainEvent and Command sticky
+   * notes' `notes` field. Use case-level context: flow descriptions, caveats,
+   * cross-references. NOT part of the formal contract — downstream code-gen
+   * should treat as advisory only.
+   */
+  notes?: string;
   aggregate?: string;
   paths?: string[];
   // Hoare triple {P} c {Q} ordering (gemini-review-fix): pre → input → post → emittedEvent

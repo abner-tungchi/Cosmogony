@@ -260,12 +260,22 @@ export const buildUseCaseSpec = (
   }));
   const postconditions = (commandNote?.postConditions ?? []).map((c) => ({ text: c.text }));
 
+  // Free-form annotations from DomainEvent + Command sticky notes.
+  // Merge with labels when both present so downstream can tell which side
+  // wrote what; emit a single string when only one side has notes.
+  const eventNoteText = domainEvent.notes?.trim();
+  const commandNoteText = commandNote?.notes?.trim();
+  const notes = eventNoteText && commandNoteText
+    ? `[event] ${eventNoteText}\n\n[command] ${commandNoteText}`
+    : eventNoteText || commandNoteText || undefined;
+
   const spec: UseCaseSpec = {
     kind: 'UseCaseSpec',
     useCaseSpecId: domainEvent.id,
     aggregateSpecId: aggregateNote?.id,
     useCase: commandLabel,
     behavior: domainEvent.behavior,
+    notes,
     aggregate: aggregateLabel,
     paths,
     // Hoare triple {P} c {Q} ordering (gemini-review-fix)
