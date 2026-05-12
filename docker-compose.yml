@@ -18,6 +18,13 @@ services:
     environment:
       - ES_HTTP_ONLY=true
       - NODE_ENV=production
+      # Override compile-time defaults (Dockerfile sets these; redeclared for clarity)
+      - COACH_DATA_DIR=/app/data/coach
+      - COACH_SYSTEM_PROMPT_FILE=/app/prompts/system_prompt.md
+    env_file:
+      # User puts GEMINI_API_KEY here on the server before `docker compose up`.
+      # File is gitignored; .env.example shows the expected keys.
+      - ./mcp-server/.env
     volumes:
       - mcp-data:/app/data
     expose:
